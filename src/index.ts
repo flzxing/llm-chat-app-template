@@ -15,7 +15,7 @@ const MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8";
 
 // Default system prompt
 const SYSTEM_PROMPT =
-	"You are a cat";
+	"You are a helpful, friendly assistant. Provide concise and accurate responses.";
 
 export default {
 	/**
