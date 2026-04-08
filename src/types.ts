@@ -12,6 +12,16 @@ export interface Env {
 	 * Binding for static assets.
 	 */
 	ASSETS: { fetch: (request: Request) => Promise<Response> };
+
+	/**
+	 * D1 database (users, refresh_tokens).
+	 */
+	DB: D1Database;
+
+	/**
+	 * Secret for signing JWTs. Set via `wrangler secret put JWT_SECRET`.
+	 */
+	JWT_SECRET: string;
 }
 
 /**
