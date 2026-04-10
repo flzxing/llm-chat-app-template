@@ -95,7 +95,12 @@ export async function handleRegister(
 			deviceInfo: device_info ?? null,
 		});
 		return jsonResponse({ ...tokens, userId, username, upgraded: false });
-	} catch {
+	} catch (error) {
+		console.error("Register failed", {
+			error,
+			path: "/api/register",
+			method: request.method,
+		});
 		return jsonResponse({ error: "Registration failed" }, 500);
 	}
 }
@@ -146,7 +151,12 @@ export async function handleLogin(
 			deviceInfo: device_info ?? null,
 		});
 		return jsonResponse({ ...tokens, userId: user.id });
-	} catch {
+	} catch (error) {
+		console.error("Login failed", {
+			error,
+			path: "/api/login",
+			method: request.method,
+		});
 		return jsonResponse({ error: "Login failed" }, 500);
 	}
 }
@@ -190,7 +200,12 @@ export async function handleRefresh(
 			deviceInfo: device_info ?? null,
 		});
 		return jsonResponse(tokens);
-	} catch {
+	} catch (error) {
+		console.error("Refresh failed", {
+			error,
+			path: "/api/refresh",
+			method: request.method,
+		});
 		return jsonResponse({ error: "Invalid refresh request" }, 401);
 	}
 }
