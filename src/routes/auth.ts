@@ -8,6 +8,21 @@ import { hashPassword, hashToken } from "../crypto";
 import { jsonResponse } from "../http";
 import type { Env } from "../types";
 
+function serializeError(error: unknown): {
+	name?: string;
+	message: string;
+	stack?: string;
+} {
+	if (error instanceof Error) {
+		return {
+			name: error.name,
+			message: error.message,
+			stack: error.stack,
+		};
+	}
+	return { message: String(error) };
+}
+
 export async function handleRegister(
 	request: Request,
 	env: Env,
@@ -97,7 +112,7 @@ export async function handleRegister(
 		return jsonResponse({ ...tokens, userId, username, upgraded: false });
 	} catch (error) {
 		console.error("Register failed", {
-			error,
+			error: serializeError(error),
 			path: "/api/register",
 			method: request.method,
 		});
@@ -153,7 +168,7 @@ export async function handleLogin(
 		return jsonResponse({ ...tokens, userId: user.id });
 	} catch (error) {
 		console.error("Login failed", {
-			error,
+			error: serializeError(error),
 			path: "/api/login",
 			method: request.method,
 		});
@@ -202,7 +217,7 @@ export async function handleRefresh(
 		return jsonResponse(tokens);
 	} catch (error) {
 		console.error("Refresh failed", {
-			error,
+			error: serializeError(error),
 			path: "/api/refresh",
 			method: request.method,
 		});
