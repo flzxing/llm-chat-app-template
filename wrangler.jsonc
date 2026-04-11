@@ -12,8 +12,9 @@
 		"binding": "ASSETS",
 		"directory": "./public"
 	},
+	// 生产部署用；本地 wrangler dev 以 .dev.vars 中的 BETTER_AUTH_URL 覆盖
 	"vars": {
-		"BETTER_AUTH_URL": "http://127.0.0.1:8787"
+		"BETTER_AUTH_URL": "https://llm-chat-app-template.zhouxing87808911.workers.dev"
 	},
 	"d1_databases": [
 		{
