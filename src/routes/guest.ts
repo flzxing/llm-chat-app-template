@@ -1,8 +1,14 @@
 /**
- * POST /api/guest/session — 按 device_id 幂等创建或恢复游客会话（JWT + refresh）
+ * POST /api/guest/session — 合成账号 + 确定性密码，按 device_id 幂等
  */
 import { GUEST_INITIAL_CREDITS, DEVICE_ID_MAX_LEN, DEVICE_ID_MIN_LEN } from "../constants";
-import { generateTokenPair } from "../auth";
+import { createAuth } from "../auth";
+import {
+	authRequest,
+	guestEmailForDevice,
+	guestPassword,
+	guestUsernameForDevice,
+} from "../guest-utils";
 import { jsonResponse } from "../http";
 import type { Env } from "../types";
 
@@ -16,10 +22,25 @@ function isValidDeviceId(id: string): boolean {
 	);
 }
 
+function tokenFromAuthResponse(
+	res: Response,
+	bodyText: string,
+): string | null {
+	const header =
+		res.headers.get("set-auth-token") ?? res.headers.get("Set-Auth-Token");
+	if (header) return header;
+	try {
+		const j = JSON.parse(bodyText) as { token?: string | null };
+		if (j.token && typeof j.token === "string") return j.token;
+	} catch {
+		/* ignore */
+	}
+	return null;
+}
+
 export async function handleGuestSession(
 	request: Request,
 	env: Env,
-	secret: Uint8Array,
 ): Promise<Response> {
 	try {
 		const body = (await request.json()) as { device_id?: string };
@@ -34,57 +55,108 @@ export async function handleGuestSession(
 		}
 
 		const existing = await env.DB.prepare(
-			"SELECT id, is_guest, status, credits FROM users WHERE device_id = ?",
+			"SELECT user_id, credits, status, is_guest FROM user_profiles WHERE device_id = ?",
 		)
 			.bind(deviceId)
 			.first<{
-				id: string;
-				is_guest: number;
-				status: string;
+				user_id: string;
 				credits: number;
+				status: string;
+				is_guest: number;
 			}>();
 
 		if (existing) {
 			if (existing.is_guest !== 1) {
 				return jsonResponse(
-					{ error: "This device is linked to a registered account; please log in" },
+					{
+						error:
+							"This device is linked to a registered account; please log in",
+					},
 					403,
 				);
 			}
 			if (existing.status !== "active") {
 				return jsonResponse({ error: "Account disabled" }, 403);
 			}
-			const tokens = await generateTokenPair(existing.id, secret, env, {
-				deviceInfo: `guest:${deviceId.slice(0, 64)}`,
-			});
+			const email = await guestEmailForDevice(deviceId);
+			const password = await guestPassword(env.BETTER_AUTH_SECRET, deviceId);
+			const auth = createAuth(env);
+			const res = await auth.handler(
+				authRequest(env, "/sign-in/email", { email, password }),
+			);
+			const text = await res.text();
+			const token = tokenFromAuthResponse(res, text);
+			if (!res.ok || !token) {
+				return jsonResponse({ error: "Guest session failed" }, 500);
+			}
 			return jsonResponse({
-				...tokens,
-				userId: existing.id,
+				accessToken: token,
+				userId: existing.user_id,
 				isGuest: true,
 				credits: existing.credits,
 			});
 		}
 
-		const userId = "u_" + crypto.randomUUID().replace(/-/g, "");
-		const now = Math.floor(Date.now() / 1000);
+		const email = await guestEmailForDevice(deviceId);
+		const password = await guestPassword(env.BETTER_AUTH_SECRET, deviceId);
+		const username = await guestUsernameForDevice(deviceId);
+		const auth = createAuth(env);
+
+		const signUpRes = await auth.handler(
+			authRequest(env, "/sign-up/email", {
+				email,
+				password,
+				name: "Guest",
+				username,
+			}),
+		);
+
+		const signUpText = await signUpRes.text();
+		if (!signUpRes.ok) {
+			console.error("Guest sign-up failed", signUpRes.status, signUpText);
+			return jsonResponse({ error: "Guest session failed" }, 500);
+		}
+
+		let signUpJson: { token?: string | null; user?: { id: string } };
+		try {
+			signUpJson = JSON.parse(signUpText) as {
+				token?: string | null;
+				user?: { id: string };
+			};
+		} catch {
+			return jsonResponse({ error: "Guest session failed" }, 500);
+		}
+
+		const userId = signUpJson.user?.id;
+		if (!userId) {
+			return jsonResponse({ error: "Guest session failed" }, 500);
+		}
 
 		await env.DB.prepare(
-			`INSERT INTO users (id, device_id, username, password_hash, is_guest, credits, tier, pro_expires_at, status, created_at, updated_at)
-       VALUES (?, ?, NULL, NULL, 1, ?, 'free', 0, 'active', ?, ?)`,
+			`UPDATE user_profiles SET is_guest = 1, device_id = ?, credits = ?, updated_at = ?
+       WHERE user_id = ?`,
 		)
-			.bind(userId, deviceId, GUEST_INITIAL_CREDITS, now, now)
+			.bind(
+				deviceId,
+				GUEST_INITIAL_CREDITS,
+				Math.floor(Date.now() / 1000),
+				userId,
+			)
 			.run();
 
-		const tokens = await generateTokenPair(userId, secret, env, {
-			deviceInfo: `guest:${deviceId.slice(0, 64)}`,
-		});
+		const token = tokenFromAuthResponse(signUpRes, signUpText);
+		if (!token) {
+			return jsonResponse({ error: "Guest session failed" }, 500);
+		}
+
 		return jsonResponse({
-			...tokens,
+			accessToken: token,
 			userId,
 			isGuest: true,
 			credits: GUEST_INITIAL_CREDITS,
 		});
-	} catch {
+	} catch (e) {
+		console.error("Guest session error", e);
 		return jsonResponse({ error: "Guest session failed" }, 500);
 	}
 }

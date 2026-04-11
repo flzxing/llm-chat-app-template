@@ -16,27 +16,53 @@ function uniqueName(prefix: string): string {
 	return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
-async function register(
+function syntheticEmail(username: string): string {
+	return `${username}@example.com`;
+}
+
+function authTokenFromResponse(res: Response, bodyText: string): string {
+	const h =
+		res.headers.get("set-auth-token") ?? res.headers.get("Set-Auth-Token");
+	if (h) return h;
+	const j = JSON.parse(bodyText) as { token?: string };
+	if (!j.token) throw new Error("missing bearer token in auth response");
+	return j.token;
+}
+
+async function signUpUsername(
 	username: string,
 	password: string,
-	deviceInfo?: string,
-): Promise<{ accessToken: string; refreshToken: string; userId: string }> {
-	const res = await SELF.fetch("https://example.com/api/register", {
+): Promise<{ accessToken: string; userId: string }> {
+	const res = await SELF.fetch("https://example.com/api/auth/sign-up/email", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
-			username,
+			name: username,
+			email: syntheticEmail(username),
 			password,
-			...(deviceInfo != null ? { device_info: deviceInfo } : {}),
+			username,
 		}),
 	});
-	const data = (await res.json()) as Record<string, unknown>;
+	const text = await res.text();
 	expect(res.status).toBe(200);
-	return {
-		accessToken: data.accessToken as string,
-		refreshToken: data.refreshToken as string,
-		userId: data.userId as string,
-	};
+	const data = JSON.parse(text) as { user: { id: string } };
+	const accessToken = authTokenFromResponse(res, text);
+	return { accessToken, userId: data.user.id };
+}
+
+async function signInUsername(
+	username: string,
+	password: string,
+): Promise<{ accessToken: string }> {
+	const res = await SELF.fetch("https://example.com/api/auth/sign-in/username", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ username, password }),
+	});
+	const text = await res.text();
+	expect(res.status).toBe(200);
+	const accessToken = authTokenFromResponse(res, text);
+	return { accessToken };
 }
 
 describe("API integration (SELF + D1)", () => {
@@ -87,66 +113,77 @@ describe("API integration (SELF + D1)", () => {
 		expect(res.status).toBe(404);
 	});
 
-	it("POST /api/register validates input", async () => {
-		const res = await SELF.fetch("https://example.com/api/register", {
+	it("POST /api/auth/sign-up/email validates password length", async () => {
+		const res = await SELF.fetch("https://example.com/api/auth/sign-up/email", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ username: "a", password: "short" }),
+			body: JSON.stringify({
+				name: "a",
+				email: syntheticEmail("a"),
+				username: "shortname",
+				password: "short",
+			}),
 		});
+		await res.text();
 		expect(res.status).toBe(400);
 	});
 
-	it("register → login → refresh → chat with credit deduction", async () => {
+	it("sign-up duplicate email returns 422", async () => {
 		const user = uniqueName("user");
-		const password = "secret12";
+		const password = "password12";
+		const first = await SELF.fetch("https://example.com/api/auth/sign-up/email", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				name: user,
+				email: syntheticEmail(user),
+				password,
+				username: user,
+			}),
+		});
+		await first.text();
+		expect(first.status).toBe(200);
 
-		const reg = await register(user, password, "vitest-device");
+		const dup = await SELF.fetch("https://example.com/api/auth/sign-up/email", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				name: user,
+				email: syntheticEmail(user),
+				password: "otherpass12",
+				username: `${user}_other`,
+			}),
+		});
+		await dup.text();
+		expect(dup.status).toBe(422);
+	});
+
+	it("sign-up → sign-in → chat with credit deduction", async () => {
+		const user = uniqueName("user");
+		const password = "secret1234";
+
+		const reg = await signUpUsername(user, password);
 		expect(reg.accessToken).toBeTruthy();
-		expect(reg.refreshToken).toBeTruthy();
 
-		const dup = await SELF.fetch("https://example.com/api/register", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ username: user, password: "otherpass12" }),
-		});
-		expect(dup.status).toBe(409);
+		const login = await signInUsername(user, password);
+		expect(login.accessToken).toBeTruthy();
 
-		const loginRes = await SELF.fetch("https://example.com/api/login", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ username: user, password }),
-		});
-		expect(loginRes.status).toBe(200);
-		const loginJson = (await loginRes.json()) as {
-			accessToken: string;
-			refreshToken: string;
-		};
-		expect(loginJson.accessToken).toBeTruthy();
-
-		const badLogin = await SELF.fetch("https://example.com/api/login", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ username: user, password: "wrongpass" }),
-		});
+		const badLogin = await SELF.fetch(
+			"https://example.com/api/auth/sign-in/username",
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ username: user, password: "wrongpass12" }),
+			},
+		);
+		await badLogin.text();
 		expect(badLogin.status).toBe(401);
-
-		const refreshRes = await SELF.fetch("https://example.com/api/refresh", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ refreshToken: loginJson.refreshToken }),
-		});
-		expect(refreshRes.status).toBe(200);
-		const refreshJson = (await refreshRes.json()) as {
-			accessToken: string;
-			refreshToken: string;
-		};
-		expect(refreshJson.accessToken).toBeTruthy();
 
 		const chatRes = await SELF.fetch("https://example.com/api/chat", {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
-				Authorization: `Bearer ${refreshJson.accessToken}`,
+				Authorization: `Bearer ${login.accessToken}`,
 			},
 			body: JSON.stringify({
 				messages: [{ role: "user", content: "ping" }],
@@ -155,9 +192,10 @@ describe("API integration (SELF + D1)", () => {
 		expect(chatRes.status).toBe(200);
 		expect(chatRes.headers.get("content-type")).toContain("text/event-stream");
 		expect(chatRes.headers.get("X-Credits-Remaining")).toBe("990");
+		await chatRes.text();
 
 		const row = await env.DB.prepare(
-			"SELECT credits FROM users WHERE id = ?",
+			"SELECT credits FROM user_profiles WHERE user_id = ?",
 		)
 			.bind(reg.userId)
 			.first<{ credits: number }>();
@@ -173,7 +211,7 @@ describe("API integration (SELF + D1)", () => {
 
 	it("chat with invalid model_id returns 400", async () => {
 		const user = uniqueName("m");
-		const { accessToken } = await register(user, "password12");
+		const { accessToken } = await signUpUsername(user, "password12");
 
 		const res = await SELF.fetch("https://example.com/api/chat", {
 			method: "POST",
@@ -191,9 +229,9 @@ describe("API integration (SELF + D1)", () => {
 
 	it("chat when insufficient credits returns 402", async () => {
 		const user = uniqueName("poor");
-		const { accessToken, userId } = await register(user, "password12");
+		const { accessToken, userId } = await signUpUsername(user, "password12");
 
-		await env.DB.prepare("UPDATE users SET credits = 5 WHERE id = ?")
+		await env.DB.prepare("UPDATE user_profiles SET credits = 5 WHERE user_id = ?")
 			.bind(userId)
 			.run();
 
@@ -212,9 +250,9 @@ describe("API integration (SELF + D1)", () => {
 
 	it("chat when account banned returns 403", async () => {
 		const user = uniqueName("ban");
-		const { accessToken, userId } = await register(user, "password12");
+		const { accessToken, userId } = await signUpUsername(user, "password12");
 
-		await env.DB.prepare("UPDATE users SET status = 'banned' WHERE id = ?")
+		await env.DB.prepare("UPDATE user_profiles SET status = 'banned' WHERE user_id = ?")
 			.bind(userId)
 			.run();
 
@@ -238,7 +276,7 @@ describe("API integration (SELF + D1)", () => {
 		).run();
 
 		const user = uniqueName("free");
-		const { accessToken } = await register(user, "password12");
+		const { accessToken } = await signUpUsername(user, "password12");
 
 		const res = await SELF.fetch("https://example.com/api/chat", {
 			method: "POST",
@@ -254,31 +292,41 @@ describe("API integration (SELF + D1)", () => {
 		expect(res.status).toBe(403);
 	});
 
-	it("login rejected when account not active", async () => {
+	it("sign-in rejected when account not active", async () => {
 		const user = uniqueName("inactive");
-		const { userId } = await register(user, "password12");
+		const { userId } = await signUpUsername(user, "password12");
 
-		await env.DB.prepare("UPDATE users SET status = 'banned' WHERE id = ?")
+		await env.DB.prepare("UPDATE user_profiles SET status = 'banned' WHERE user_id = ?")
 			.bind(userId)
 			.run();
 
-		const res = await SELF.fetch("https://example.com/api/login", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ username: user, password: "password12" }),
-		});
-		expect(res.status).toBe(403);
+		const res = await SELF.fetch(
+			"https://example.com/api/auth/sign-in/username",
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ username: user, password: "password12" }),
+			},
+		);
+		const resText = await res.text();
+		// session.create.before 拦截封号用户时，Better Auth 返回 FAILED_TO_CREATE_SESSION（500）
+		expect(res.status).toBe(500);
+		const body = JSON.parse(resText) as { code?: string };
+		expect(body.code).toBe("FAILED_TO_CREATE_SESSION");
 	});
 
-	it("refresh with unknown token returns 403 (session expired)", async () => {
-		const res = await SELF.fetch("https://example.com/api/refresh", {
+	it("chat with invalid Bearer token returns 401", async () => {
+		const res = await SELF.fetch("https://example.com/api/chat", {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ refreshToken: "not-a-valid-uuid-session" }),
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer not-a-valid-session-token",
+			},
+			body: JSON.stringify({
+				messages: [{ role: "user", content: "x" }],
+			}),
 		});
-		expect(res.status).toBe(403);
-		const body = (await res.json()) as { error: string };
-		expect(body.error).toBe("Session expired");
+		expect(res.status).toBe(401);
 	});
 
 	it("POST /api/guest/session creates guest with 100 credits and is idempotent", async () => {
@@ -310,77 +358,11 @@ describe("API integration (SELF + D1)", () => {
 		expect(j2.userId).toBe(j1.userId);
 
 		const row = await env.DB.prepare(
-			"SELECT is_guest, credits FROM users WHERE id = ?",
+			"SELECT is_guest, credits FROM user_profiles WHERE user_id = ?",
 		)
 			.bind(j1.userId)
 			.first<{ is_guest: number; credits: number }>();
 		expect(row?.is_guest).toBe(1);
 		expect(row?.credits).toBe(100);
-	});
-
-	it("guest register with Bearer upgrades in place and preserves credits", async () => {
-		const deviceId = `d_${crypto.randomUUID().replace(/-/g, "")}`;
-		const gs = await SELF.fetch("https://example.com/api/guest/session", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ device_id: deviceId }),
-		});
-		const { userId, accessToken } = (await gs.json()) as {
-			userId: string;
-			accessToken: string;
-		};
-
-		await env.DB.prepare("UPDATE users SET credits = 77 WHERE id = ?")
-			.bind(userId)
-			.run();
-
-		const user = uniqueName("upg");
-		const up = await SELF.fetch("https://example.com/api/register", {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${accessToken}`,
-			},
-			body: JSON.stringify({ username: user, password: "secret12" }),
-		});
-		expect(up.status).toBe(200);
-		const upJson = (await up.json()) as {
-			upgraded: boolean;
-			userId: string;
-			username: string;
-		};
-		expect(upJson.upgraded).toBe(true);
-		expect(upJson.userId).toBe(userId);
-		expect(upJson.username).toBe(user);
-
-		const row = await env.DB.prepare(
-			"SELECT is_guest, credits FROM users WHERE id = ?",
-		)
-			.bind(userId)
-			.first<{ is_guest: number; credits: number }>();
-		expect(row?.is_guest).toBe(0);
-		expect(row?.credits).toBe(77);
-
-		const again = await SELF.fetch("https://example.com/api/guest/session", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ device_id: deviceId }),
-		});
-		expect(again.status).toBe(403);
-	});
-
-	it("register with Bearer for non-guest returns 400", async () => {
-		const user = uniqueName("reg");
-		const { accessToken } = await register(user, "password12");
-
-		const res = await SELF.fetch("https://example.com/api/register", {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${accessToken}`,
-			},
-			body: JSON.stringify({ username: "other_name", password: "secret12" }),
-		});
-		expect(res.status).toBe(400);
 	});
 });

@@ -14,15 +14,19 @@ export default defineWorkersConfig(async () => {
 	return {
 		test: {
 			include: ["test/**/*.spec.ts"],
-			setupFiles: ["./test/apply-migrations.ts"],
+			setupFiles: [
+				"./test/apply-migrations.ts",
+				"./test/suppress-ba-transaction-rejections.ts",
+			],
 			poolOptions: {
 				workers: {
 					wrangler: { configPath: "./wrangler.jsonc" },
 					miniflare: {
 						bindings: {
 							TEST_MIGRATIONS: migrations,
-							JWT_SECRET:
-								"test-jwt-secret-for-vitest-only-must-be-long-enough-hs256",
+							BETTER_AUTH_SECRET:
+								"test-better-auth-secret-for-vitest-min-32-chars!!",
+							BETTER_AUTH_URL: "https://example.com",
 						},
 					},
 				},

@@ -42,7 +42,7 @@ export async function handleChatRequest(
 		}
 
 		const user = await env.DB.prepare(
-			"SELECT credits, status, pro_expires_at FROM users WHERE id = ?",
+			"SELECT credits, status, pro_expires_at FROM user_profiles WHERE user_id = ?",
 		)
 			.bind(userId)
 			.first<UserRow>();
@@ -79,7 +79,7 @@ export async function handleChatRequest(
 
 			const batchResults = await env.DB.batch([
 				env.DB.prepare(
-					"UPDATE users SET credits = credits - ?, updated_at = ? WHERE id = ? AND credits >= ?",
+					"UPDATE user_profiles SET credits = credits - ?, updated_at = ? WHERE user_id = ? AND credits >= ?",
 				).bind(cost, ts, userId, cost),
 				env.DB.prepare(
 					`INSERT INTO credit_ledger (id, user_id, amount, balance_after, action, reference_id, description, created_at)

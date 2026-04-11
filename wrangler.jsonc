@@ -12,14 +12,16 @@
 		"binding": "ASSETS",
 		"directory": "./public"
 	},
-	// --- 重点：添加 D1 绑定 ---
-    "d1_databases": [
-        {
-            "binding": "DB", // 确保这里是 "DB"，以匹配你代码里的 env.DB
-            "database_name": "kmp-ai-db",
-            "database_id": "ef3619ac-5659-4447-b36d-119051dd38af"
-        }
-    ],
+	"vars": {
+		"BETTER_AUTH_URL": "http://127.0.0.1:8787"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "kmp-ai-db",
+			"database_id": "ef3619ac-5659-4447-b36d-119051dd38af"
+		}
+	],
 	"observability": {
 		"enabled": true
 	},

@@ -1,2 +1,5 @@
-# 复制为 .dev.vars 后本地 wrangler dev 才能签发 JWT（勿提交 .dev.vars）
-JWT_SECRET=请替换为足够长的随机字符串用于HS256
+# 复制为 .dev.vars 后本地 wrangler dev（勿提交 .dev.vars）
+# BETTER_AUTH_SECRET 生产环境请用 wrangler secret put
+BETTER_AUTH_SECRET=请替换为至少32字符的随机密钥
+# 与 wrangler dev 访问地址一致即可
+BETTER_AUTH_URL=http://127.0.0.1:8787

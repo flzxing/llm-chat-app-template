@@ -1,71 +1,52 @@
 /**
  * LLM Chat Application Template
  *
- * Workers AI 流式聊天 + JWT 鉴权 + D1 商业数据模型（渐进实现）。
+ * Workers AI 流式聊天 + Better Auth（Bearer）+ D1。
  *
  * @license MIT
  */
-import { verifyAccessToken } from "./auth";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { secureHeaders } from "hono/secure-headers";
+import { createAuth } from "./auth";
 import { handleChatRequest } from "./chat";
-import { CORS_HEADERS, jsonResponse, preflightResponse } from "./http";
-import {
-	handleLogin,
-	handleRefresh,
-	handleRegister,
-} from "./routes/auth";
 import { handleGuestSession } from "./routes/guest";
 import type { Env } from "./types";
 
-export default {
-	async fetch(
-		request: Request,
-		env: Env,
-		_ctx: ExecutionContext,
-	): Promise<Response> {
-		const url = new URL(request.url);
+const app = new Hono<{ Bindings: Env }>();
 
-		if (url.pathname.startsWith("/api/") && request.method === "OPTIONS") {
-			return preflightResponse();
-		}
+app.use(
+	"*",
+	cors({
+		origin: "*",
+		allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+		allowHeaders: ["Content-Type", "Authorization"],
+		exposeHeaders: ["Content-Length", "set-auth-token", "Set-Auth-Token"],
+	}),
+);
+app.use("*", secureHeaders());
 
-		if (url.pathname === "/" || !url.pathname.startsWith("/api/")) {
-			return env.ASSETS.fetch(request);
-		}
+app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
-		const secret = new TextEncoder().encode(env.JWT_SECRET);
+app.post("/api/guest/session", (c) => handleGuestSession(c.req.raw, c.env));
 
-		if (url.pathname === "/api/guest/session" && request.method === "POST") {
-			return handleGuestSession(request, env, secret);
-		}
+app.all("/api/chat", async (c) => {
+	if (c.req.method === "OPTIONS") {
+		return c.body(null, 204);
+	}
+	if (c.req.method !== "POST") {
+		return c.json({ error: "Method not allowed" }, 405);
+	}
+	const auth = createAuth(c.env);
+	const session = await auth.api.getSession({ headers: c.req.raw.headers });
+	if (!session) {
+		return c.json({ error: "Unauthorized" }, 401);
+	}
+	return handleChatRequest(c.req.raw.clone(), c.env, session.user.id);
+});
 
-		if (url.pathname === "/api/register" && request.method === "POST") {
-			return handleRegister(request, env, secret);
-		}
+app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
-		if (url.pathname === "/api/login" && request.method === "POST") {
-			return handleLogin(request, env, secret);
-		}
+app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
-		if (url.pathname === "/api/refresh" && request.method === "POST") {
-			return handleRefresh(request, env, secret);
-		}
-
-		if (url.pathname === "/api/chat") {
-			if (request.method !== "POST") {
-				return new Response("Method not allowed", {
-					status: 405,
-					headers: CORS_HEADERS,
-				});
-			}
-
-			const auth = await verifyAccessToken(request, secret);
-			if (!auth.ok) {
-				return jsonResponse({ error: auth.error }, auth.status);
-			}
-
-			return handleChatRequest(request, env, auth.userId);
-		}
-
-		return jsonResponse({ error: "Not Found" }, 404);
-	},
-} satisfies ExportedHandler<Env>;
+export default app;

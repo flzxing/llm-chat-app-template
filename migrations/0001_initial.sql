@@ -1,50 +1,80 @@
--- 商业级 D1 架构（用户与资产 / 计费与产品 / 流水与留存）
--- 注意：删除顺序必须先子表后父表，避免外键约束失败
+-- Better Auth 核心表（由 `npx auth@latest generate --config scripts/auth-schema.config.ts` 生成，勿手改列名）
+-- + 业务表 user_profiles / models / 流水与对话
 
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS conversations;
 DROP TABLE IF EXISTS credit_ledger;
-DROP TABLE IF EXISTS refresh_tokens;
-DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS user_profiles;
+DROP TABLE IF EXISTS session;
+DROP TABLE IF EXISTS account;
+DROP TABLE IF EXISTS verification;
+DROP TABLE IF EXISTS user;
 DROP TABLE IF EXISTS models;
 
--- ==========================================
--- 模块一：用户与资产 (User & Assets)
--- ==========================================
+CREATE TABLE "user" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "email" TEXT NOT NULL UNIQUE,
+    "emailVerified" INTEGER NOT NULL,
+    "image" TEXT,
+    "createdAt" DATE NOT NULL,
+    "updatedAt" DATE NOT NULL,
+    "username" TEXT UNIQUE,
+    "displayUsername" TEXT
+);
 
-CREATE TABLE users (
-    id TEXT PRIMARY KEY,
-    device_id TEXT UNIQUE,
-    username TEXT UNIQUE,
-    password_hash TEXT,
-    is_guest INTEGER DEFAULT 1,
+CREATE TABLE "session" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "expiresAt" DATE NOT NULL,
+    "token" TEXT NOT NULL UNIQUE,
+    "createdAt" DATE NOT NULL,
+    "updatedAt" DATE NOT NULL,
+    "ipAddress" TEXT,
+    "userAgent" TEXT,
+    "userId" TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE
+);
 
+CREATE TABLE "account" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "accountId" TEXT NOT NULL,
+    "providerId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
+    "accessToken" TEXT,
+    "refreshToken" TEXT,
+    "idToken" TEXT,
+    "accessTokenExpiresAt" DATE,
+    "refreshTokenExpiresAt" DATE,
+    "scope" TEXT,
+    "password" TEXT,
+    "createdAt" DATE NOT NULL,
+    "updatedAt" DATE NOT NULL
+);
+
+CREATE TABLE "verification" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "identifier" TEXT NOT NULL,
+    "value" TEXT NOT NULL,
+    "expiresAt" DATE NOT NULL,
+    "createdAt" DATE NOT NULL,
+    "updatedAt" DATE NOT NULL
+);
+
+CREATE INDEX "session_userId_idx" ON "session" ("userId");
+CREATE INDEX "account_userId_idx" ON "account" ("userId");
+CREATE INDEX "verification_identifier_idx" ON "verification" ("identifier");
+
+-- 业务资料（与 Better Auth user.id 一一对应）
+CREATE TABLE user_profiles (
+    user_id TEXT NOT NULL PRIMARY KEY REFERENCES "user" ("id") ON DELETE CASCADE,
     credits INTEGER DEFAULT 1000,
     tier TEXT DEFAULT 'free',
     pro_expires_at INTEGER DEFAULT 0,
-
     status TEXT DEFAULT 'active',
-    created_at INTEGER DEFAULT (cast(strftime('%s', 'now') AS INTEGER)),
-    updated_at INTEGER DEFAULT (cast(strftime('%s', 'now') AS INTEGER))
+    is_guest INTEGER DEFAULT 0,
+    device_id TEXT UNIQUE,
+    created_at INTEGER DEFAULT (CAST(strftime('%s', 'now') AS INTEGER)),
+    updated_at INTEGER DEFAULT (CAST(strftime('%s', 'now') AS INTEGER))
 );
-
-CREATE TABLE refresh_tokens (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    token_hash TEXT NOT NULL,
-    device_info TEXT,
-    expires_at INTEGER NOT NULL,
-    revoked_at INTEGER DEFAULT 0,
-    created_at INTEGER DEFAULT (cast(strftime('%s', 'now') AS INTEGER)),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_token_hash ON refresh_tokens(token_hash);
-CREATE INDEX IF NOT EXISTS idx_user_id ON refresh_tokens(user_id);
-
--- ==========================================
--- 模块二：计费与产品配置 (Billing & Products)
--- ==========================================
 
 CREATE TABLE models (
     id TEXT PRIMARY KEY,
@@ -56,7 +86,6 @@ CREATE TABLE models (
     sort_order INTEGER DEFAULT 0
 );
 
--- 默认上架模型（与 Worker 中默认 chat 模型一致，可按需增删）
 INSERT INTO models (id, display_name, provider_model_id, cost_per_msg, requires_pro, is_active, sort_order)
 VALUES (
     'llama-3.1-8b',
@@ -68,42 +97,35 @@ VALUES (
     0
 );
 
--- ==========================================
--- 模块三：业务流水与留存 (Ledger & History)
--- ==========================================
-
 CREATE TABLE credit_ledger (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES user_profiles (user_id) ON DELETE CASCADE,
     amount INTEGER NOT NULL,
     balance_after INTEGER NOT NULL,
     action TEXT NOT NULL,
     reference_id TEXT,
     description TEXT,
-    created_at INTEGER DEFAULT (cast(strftime('%s', 'now') AS INTEGER)),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    created_at INTEGER DEFAULT (CAST(strftime('%s', 'now') AS INTEGER))
 );
 
-CREATE INDEX IF NOT EXISTS idx_ledger_user ON credit_ledger(user_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_user ON credit_ledger (user_id);
 
 CREATE TABLE conversations (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES user_profiles (user_id) ON DELETE CASCADE,
     title TEXT DEFAULT '新对话',
     model_id TEXT NOT NULL,
-    created_at INTEGER DEFAULT (cast(strftime('%s', 'now') AS INTEGER)),
-    updated_at INTEGER DEFAULT (cast(strftime('%s', 'now') AS INTEGER)),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    created_at INTEGER DEFAULT (CAST(strftime('%s', 'now') AS INTEGER)),
+    updated_at INTEGER DEFAULT (CAST(strftime('%s', 'now') AS INTEGER))
 );
 
 CREATE TABLE messages (
     id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
     tokens_used INTEGER DEFAULT 0,
-    created_at INTEGER DEFAULT (cast(strftime('%s', 'now') AS INTEGER)),
-    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    created_at INTEGER DEFAULT (CAST(strftime('%s', 'now') AS INTEGER))
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages (conversation_id);
