@@ -13,7 +13,7 @@ export const DEVICE_ID_MIN_LEN = 8;
 export const DEVICE_ID_MAX_LEN = 128;
 
 /** models 表中的逻辑 id，请求体可传 model_id 覆盖 */
-export const DEFAULT_CHAT_MODEL_ID = "llama-3.1-8b";
+export const DEFAULT_CHAT_MODEL_ID = "gpt-oss-20b";
 
 export const SYSTEM_PROMPT =
 	"You are a helpful, friendly assistant. Provide concise and accurate responses.";

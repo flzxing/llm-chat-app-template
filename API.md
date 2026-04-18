@@ -79,7 +79,7 @@
   - `Access-Control-Allow-Origin: *`  
   - `Access-Control-Allow-Methods`: 含 `GET, POST, PUT, DELETE, OPTIONS`  
   - `Access-Control-Allow-Headers`: `Content-Type`, `Authorization`，以及人机验证用的 **`x-captcha-response`**  
-  - 暴露头包含：`set-auth-token` / `Set-Auth-Token`（便于部分环境读取）
+  - 暴露头包含：`set-auth-token` / `Set-Auth-Token`，以及聊天流场景的 **`X-Credits-Remaining`**、**`X-Chat-Reference-Id`**（便于浏览器 `fetch` 读取）
 
 - **人机验证（Cloudflare Turnstile + Better Auth Captcha）**  
   - 下文列出的账号相关接口须在 HTTP 请求头携带 **`x-captcha-response`**，值为 Turnstile 控件回调得到的 token（即浏览器表单字段 **`cf-turnstile-response`** 的同内容；亦可由移动端/原生 SDK 取得）。集成方式见 [Better Auth Captcha 插件](https://www.better-auth.com/docs/plugins/captcha)（本项目使用 **`provider: cloudflare-turnstile`**）。  
@@ -283,6 +283,8 @@ x-captcha-response: <Turnstile token>
 
 **作用**：在会话有效的前提下，按所选模型进行对话，**流式**返回模型输出，并按规则扣减积分。
 
+成功时响应体为 **OpenAI Chat Completions 流式 API** 兼容的 **SSE**（`text/event-stream`）：服务端**透传** Workers AI 返回的字节流，**不在网关侧解析或改写** chunk 内容。客户端应按 OpenAI 约定解析 `data:` 行（含 `data: [DONE]` 结束标记）。非流式错误仍以 JSON 返回。
+
 ### 请求
 
 ```http
@@ -312,12 +314,28 @@ Authorization: Bearer <accessToken>
   - `X-Credits-Remaining`：本次请求完成扣费后的**剩余积分**  
   - `X-Chat-Reference-Id`：本次对话计费关联 ID（对账、客服可查）
 
-SSE 每条事件为单行 `data: ` 前缀的 JSON，具体字段以实际模型输出为准，例如：
+**流式正文（OpenAI 兼容）**
+
+- 每个 SSE 事件一行或多行 `data: `，负载为 JSON；流结束前会发送 **`data: [DONE]`**（字面量，非 JSON）。  
+- 典型 chunk 的 `object` 为 **`chat.completion.chunk`**，增量文本在 **`choices[0].delta`** 中，例如：  
+  - **`delta.content`**：助手回复正文片段  
+  - **`delta.reasoning_content`**：部分推理模型会流式输出思考过程（扩展字段，见 Cloudflare Workers AI 实际输出）  
+  - **`delta.tool_calls`**：工具调用时分片到达，需按 OpenAI 流式 tool_calls 规则合并  
+- 首包常带 **`delta.role`**、空 **`content`**；最后一包可能带 **`finish_reason`**。  
+- 完整形态可参考仓库内示例 **`model_reponse_demo.md`**（与 `curl …/ai/run/...` 的 SSE 一致）。
+
+示例（节选，实际以模型为准）：
 
 ```text
-data: {"response":"你好","p":"..."}
+data: {"id":"chatcmpl-…","object":"chat.completion.chunk","created":1776510399,"model":"@cf/…","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}],…}
+
+data: {"id":"chatcmpl-…","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"你好"}}],…}
+
+data: [DONE]
 
 ```
+
+**说明**：旧版部分 Llama 流式曾使用非标准字段（如顶层 `response`）；当前网关**仅透传** Workers AI 的 OpenAI 形态 SSE，客户端请**不要**依赖已废弃格式。
 
 ### 失败（JSON）
 

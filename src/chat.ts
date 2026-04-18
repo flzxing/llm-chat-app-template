@@ -1,8 +1,10 @@
 /**
- * /api/chat：鉴权后按 models 定价扣积分并写 credit_ledger，再调用 Workers AI 流式输出
+ * /api/chat：鉴权后按 models 定价扣积分并写 credit_ledger，再调用 Workers AI；
+ * 成功时将上游 OpenAI 兼容 SSE 流原样返回（见 openai-sse.ts）。
  */
 import { DEFAULT_CHAT_MODEL_ID, SYSTEM_PROMPT } from "./constants";
 import { CORS_HEADERS, jsonResponse } from "./http";
+import { openAiChatCompletionStreamResponse } from "./openai-sse";
 import type { ChatMessage, Env } from "./types";
 
 type ModelRow = {
@@ -116,15 +118,9 @@ export async function handleChatRequest(
 			{},
 		);
 
-		return new Response(stream, {
-			headers: {
-				"content-type": "text/event-stream; charset=utf-8",
-				"cache-control": "no-cache",
-				connection: "keep-alive",
-				"X-Credits-Remaining": String(balanceAfter),
-				"X-Chat-Reference-Id": referenceId,
-				...CORS_HEADERS,
-			},
+		return openAiChatCompletionStreamResponse(stream, {
+			creditsRemaining: balanceAfter,
+			referenceId,
 		});
 	} catch (error) {
 		console.error("Error processing chat request:", error);

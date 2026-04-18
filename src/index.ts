@@ -21,7 +21,13 @@ app.use(
 		origin: "*",
 		allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
 		allowHeaders: ["Content-Type", "Authorization", "x-captcha-response"],
-		exposeHeaders: ["Content-Length", "set-auth-token", "Set-Auth-Token"],
+		exposeHeaders: [
+			"Content-Length",
+			"set-auth-token",
+			"Set-Auth-Token",
+			"X-Credits-Remaining",
+			"X-Chat-Reference-Id",
+		],
 	}),
 );
 app.use("*", secureHeaders());

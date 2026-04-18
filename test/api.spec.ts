@@ -3,10 +3,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TURNSTILE_DUMMY_RESPONSE } from "../src/constants";
 
 function mockAiStream(): ReadableStream<Uint8Array> {
+	const chunk = {
+		id: "chatcmpl-test",
+		object: "chat.completion.chunk",
+		created: 0,
+		model: "@cf/test/model",
+		choices: [
+			{
+				index: 0,
+				delta: { content: "ok" },
+				finish_reason: null,
+			},
+		],
+	};
 	return new ReadableStream({
 		start(controller) {
+			const enc = new TextEncoder();
 			controller.enqueue(
-				new TextEncoder().encode('data: {"p":"ok"}\n\n'),
+				enc.encode(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`),
 			);
 			controller.close();
 		},
@@ -261,7 +275,9 @@ describe("API integration (SELF + D1)", () => {
 		expect(chatRes.status).toBe(200);
 		expect(chatRes.headers.get("content-type")).toContain("text/event-stream");
 		expect(chatRes.headers.get("X-Credits-Remaining")).toBe("990");
-		await chatRes.text();
+		const chatBody = await chatRes.text();
+		expect(chatBody).toContain("chat.completion.chunk");
+		expect(chatBody).toContain("[DONE]");
 
 		const row = await env.DB.prepare(
 			"SELECT credits FROM user_profiles WHERE user_id = ?",

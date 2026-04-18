@@ -98,11 +98,36 @@ async function sendMessage() {
 		const reader = response.body.getReader();
 		const decoder = new TextDecoder();
 		let responseText = "";
+		let reasoningText = "";
 		let buffer = "";
 		const flushAssistantText = () => {
-			assistantTextEl.textContent = responseText;
+			const parts = [];
+			if (reasoningText.length > 0) {
+				parts.push(reasoningText);
+			}
+			if (responseText.length > 0) {
+				parts.push(responseText);
+			}
+			assistantTextEl.textContent = parts.join("\n\n");
 			chatMessages.scrollTop = chatMessages.scrollHeight;
 		};
+
+		/** OpenAI 流式 chat.completion.chunk：解析 delta，不做旧版 Workers Llama 的 response 字段兼容 */
+		function applyOpenAiChatChunk(jsonData) {
+			if (jsonData.object !== "chat.completion.chunk") return;
+			const delta = jsonData.choices?.[0]?.delta;
+			if (!delta || typeof delta !== "object") return;
+			let changed = false;
+			if (typeof delta.reasoning_content === "string") {
+				reasoningText += delta.reasoning_content;
+				changed = true;
+			}
+			if (typeof delta.content === "string") {
+				responseText += delta.content;
+				changed = true;
+			}
+			if (changed) flushAssistantText();
+		}
 
 		let sawDone = false;
 		while (true) {
@@ -116,21 +141,7 @@ async function sendMessage() {
 						break;
 					}
 					try {
-						const jsonData = JSON.parse(data);
-						// Handle both Workers AI format (response) and OpenAI format (choices[0].delta.content)
-						let content = "";
-						if (
-							typeof jsonData.response === "string" &&
-							jsonData.response.length > 0
-						) {
-							content = jsonData.response;
-						} else if (jsonData.choices?.[0]?.delta?.content) {
-							content = jsonData.choices[0].delta.content;
-						}
-						if (content) {
-							responseText += content;
-							flushAssistantText();
-						}
+						applyOpenAiChatChunk(JSON.parse(data));
 					} catch (e) {
 						console.error("Error parsing SSE data as JSON:", e, data);
 					}
@@ -149,21 +160,7 @@ async function sendMessage() {
 					break;
 				}
 				try {
-					const jsonData = JSON.parse(data);
-					// Handle both Workers AI format (response) and OpenAI format (choices[0].delta.content)
-					let content = "";
-					if (
-						typeof jsonData.response === "string" &&
-						jsonData.response.length > 0
-					) {
-						content = jsonData.response;
-					} else if (jsonData.choices?.[0]?.delta?.content) {
-						content = jsonData.choices[0].delta.content;
-					}
-					if (content) {
-						responseText += content;
-						flushAssistantText();
-					}
+					applyOpenAiChatChunk(JSON.parse(data));
 				} catch (e) {
 					console.error("Error parsing SSE data as JSON:", e, data);
 				}
@@ -173,9 +170,12 @@ async function sendMessage() {
 			}
 		}
 
-		// Add completed response to chat history
-		if (responseText.length > 0) {
-			chatHistory.push({ role: "assistant", content: responseText });
+		// Add completed response to chat history（与界面一致：推理 + 正文）
+		const historyContent = [reasoningText, responseText]
+			.filter((s) => s.length > 0)
+			.join("\n\n");
+		if (historyContent.length > 0) {
+			chatHistory.push({ role: "assistant", content: historyContent });
 		}
 	} catch (error) {
 		console.error("Error:", error);
