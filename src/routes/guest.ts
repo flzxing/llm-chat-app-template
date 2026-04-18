@@ -22,6 +22,23 @@ function isValidDeviceId(id: string): boolean {
 	);
 }
 
+/** 将 Better Auth 返回的 4xx（如 Turnstile 未通过）原样转发，避免误报成 500 */
+function forwardAuthClientError(
+	res: Response,
+	bodyText: string,
+): Response | null {
+	if (res.ok || res.status >= 500) return null;
+	try {
+		const j = JSON.parse(bodyText) as Record<string, unknown>;
+		return jsonResponse(j, res.status);
+	} catch {
+		return jsonResponse(
+			{ error: "Guest session failed", detail: bodyText.slice(0, 200) },
+			res.status,
+		);
+	}
+}
+
 function tokenFromAuthResponse(
 	res: Response,
 	bodyText: string,
@@ -100,6 +117,8 @@ export async function handleGuestSession(
 				}),
 			);
 			const text = await res.text();
+			const clientErr = forwardAuthClientError(res, text);
+			if (clientErr) return clientErr;
 			const token = tokenFromAuthResponse(res, text);
 			if (!res.ok || !token) {
 				return jsonResponse({ error: "Guest session failed" }, 500);
@@ -132,6 +151,8 @@ export async function handleGuestSession(
 		);
 
 		const signUpText = await signUpRes.text();
+		const signUpClientErr = forwardAuthClientError(signUpRes, signUpText);
+		if (signUpClientErr) return signUpClientErr;
 		if (!signUpRes.ok) {
 			console.error("Guest sign-up failed", signUpRes.status, signUpText);
 			return jsonResponse({ error: "Guest session failed" }, 500);
