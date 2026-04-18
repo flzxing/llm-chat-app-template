@@ -14,6 +14,37 @@ import type { Env } from "../types";
 
 const DEVICE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
+/** Cloudflare Turnstile 文档「Test sitekeys」——仅用于前端 data-sitekey，禁止作为 turnstile_token */
+const CF_TURNSTILE_TEST_SITEKEYS = new Set([
+	"1x00000000000000000000AA",
+	"2x00000000000000000000AB",
+	"1x00000000000000000000BB",
+	"2x00000000000000000000BB",
+	"3x00000000000000000000FF",
+]);
+
+/** 文档「Test secret keys」——仅服务端 siteverify，禁止作为 turnstile_token */
+const CF_TURNSTILE_TEST_SECRETS = new Set([
+	"1x0000000000000000000000000000000AA",
+	"2x0000000000000000000000000000000AA",
+	"3x0000000000000000000000000000000AA",
+]);
+
+function mistakenTurnstileTokenHint(token: string): string | null {
+	if (CF_TURNSTILE_TEST_SITEKEYS.has(token)) {
+		return (
+			"turnstile_token must be cf-turnstile-response from the widget after it runs, not the Site Key " +
+				"(the Site Key belongs only in the Turnstile widget). With CF dummy keys, use token XXXX.DUMMY.TOKEN.XXXX."
+		);
+	}
+	if (CF_TURNSTILE_TEST_SECRETS.has(token)) {
+		return (
+			"turnstile_token must not be your Turnstile Secret (Secret is server-only)."
+		);
+	}
+	return null;
+}
+
 function isValidDeviceId(id: string): boolean {
 	return (
 		id.length >= DEVICE_ID_MIN_LEN &&
@@ -22,20 +53,17 @@ function isValidDeviceId(id: string): boolean {
 	);
 }
 
-/** 将 Better Auth 返回的 4xx（如 Turnstile 未通过）原样转发，避免误报成 500 */
-function forwardAuthClientError(
+/** 将 Better Auth 返回的 JSON 错误（含 403 Captcha、500 UNKNOWN_ERROR）原样转发 */
+function forwardAuthJsonIfPossible(
 	res: Response,
 	bodyText: string,
 ): Response | null {
-	if (res.ok || res.status >= 500) return null;
+	if (res.ok) return null;
 	try {
 		const j = JSON.parse(bodyText) as Record<string, unknown>;
 		return jsonResponse(j, res.status);
 	} catch {
-		return jsonResponse(
-			{ error: "Guest session failed", detail: bodyText.slice(0, 200) },
-			res.status,
-		);
+		return null;
 	}
 }
 
@@ -74,6 +102,10 @@ export async function handleGuestSession(
 				},
 				400,
 			);
+		}
+		const mistaken = mistakenTurnstileTokenHint(turnstileToken);
+		if (mistaken) {
+			return jsonResponse({ error: mistaken }, 400);
 		}
 		if (!deviceId || !isValidDeviceId(deviceId)) {
 			return jsonResponse(
@@ -117,8 +149,8 @@ export async function handleGuestSession(
 				}),
 			);
 			const text = await res.text();
-			const clientErr = forwardAuthClientError(res, text);
-			if (clientErr) return clientErr;
+			const fwd = forwardAuthJsonIfPossible(res, text);
+			if (fwd) return fwd;
 			const token = tokenFromAuthResponse(res, text);
 			if (!res.ok || !token) {
 				return jsonResponse({ error: "Guest session failed" }, 500);
@@ -151,8 +183,8 @@ export async function handleGuestSession(
 		);
 
 		const signUpText = await signUpRes.text();
-		const signUpClientErr = forwardAuthClientError(signUpRes, signUpText);
-		if (signUpClientErr) return signUpClientErr;
+		const signUpFwd = forwardAuthJsonIfPossible(signUpRes, signUpText);
+		if (signUpFwd) return signUpFwd;
 		if (!signUpRes.ok) {
 			console.error("Guest sign-up failed", signUpRes.status, signUpText);
 			return jsonResponse({ error: "Guest session failed" }, 500);

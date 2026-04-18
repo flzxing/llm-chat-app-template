@@ -139,6 +139,20 @@ describe("API integration (SELF + D1)", () => {
 		expect(body.error).toContain("turnstile_token");
 	});
 
+	it("POST /api/guest/session with Turnstile sitekey as token returns 400", async () => {
+		const res = await SELF.fetch("https://example.com/api/guest/session", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				device_id: `d_${crypto.randomUUID().replace(/-/g, "")}`,
+				turnstile_token: "1x00000000000000000000AA",
+			}),
+		});
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error?: string };
+		expect(body.error).toMatch(/Site Key|cf-turnstile-response|widget/i);
+	});
+
 	it("POST /api/chat without Authorization returns 401", async () => {
 		const res = await SELF.fetch("https://example.com/api/chat", {
 			method: "POST",

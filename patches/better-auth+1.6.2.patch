@@ -1,0 +1,39 @@
+diff --git a/node_modules/better-auth/dist/plugins/captcha/verify-handlers/cloudflare-turnstile.mjs b/node_modules/better-auth/dist/plugins/captcha/verify-handlers/cloudflare-turnstile.mjs
+index e45fe31..3daea83 100644
+--- a/node_modules/better-auth/dist/plugins/captcha/verify-handlers/cloudflare-turnstile.mjs
++++ b/node_modules/better-auth/dist/plugins/captcha/verify-handlers/cloudflare-turnstile.mjs
+@@ -1,9 +1,13 @@
+ import { middlewareResponse } from "../../../utils/middleware-response.mjs";
+ import { EXTERNAL_ERROR_CODES, INTERNAL_ERROR_CODES } from "../error-codes.mjs";
+-import { betterFetch } from "@better-fetch/fetch";
+ //#region src/plugins/captcha/verify-handlers/cloudflare-turnstile.ts
++/**
++ * Turnstile siteverify 在 secret 无效等场景会返回 HTTP 400 + JSON body。
++ * @better-fetch/fetch 将非 2xx 视为 error 且 data 为空，会误触发 SERVICE_UNAVAILABLE。
++ * 这里使用原生 fetch 并始终解析 JSON（与 CF 文档一致）。
++ */
+ const cloudflareTurnstile = async ({ siteVerifyURL, captchaResponse, secretKey, remoteIP }) => {
+-	const response = await betterFetch(siteVerifyURL, {
++	const res = await fetch(siteVerifyURL, {
+ 		method: "POST",
+ 		headers: { "Content-Type": "application/json" },
+ 		body: JSON.stringify({
+@@ -12,8 +16,16 @@ const cloudflareTurnstile = async ({ siteVerifyURL, captchaResponse, secretKey,
+ 			...remoteIP && { remoteip: remoteIP }
+ 		})
+ 	});
+-	if (!response.data || response.error) throw new Error(INTERNAL_ERROR_CODES.SERVICE_UNAVAILABLE.message);
+-	if (!response.data.success) return middlewareResponse({
++	let data;
++	try {
++		data = await res.json();
++	} catch {
++		throw new Error(INTERNAL_ERROR_CODES.SERVICE_UNAVAILABLE.message);
++	}
++	if (!data || typeof data.success !== "boolean") {
++		throw new Error(INTERNAL_ERROR_CODES.SERVICE_UNAVAILABLE.message);
++	}
++	if (!data.success) return middlewareResponse({
+ 		message: EXTERNAL_ERROR_CODES.VERIFICATION_FAILED.message,
+ 		code: EXTERNAL_ERROR_CODES.VERIFICATION_FAILED.code,
+ 		status: 403
