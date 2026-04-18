@@ -17,3 +17,9 @@ export const DEFAULT_CHAT_MODEL_ID = "llama-3.1-8b";
 
 export const SYSTEM_PROMPT =
 	"You are a helpful, friendly assistant. Provide concise and accurate responses.";
+
+/**
+ * Cloudflare Turnstile 测试文档中的 dummy token，仅与测试 secret `1x0000000000000000000000000000000AA` 配对。
+ * @see https://developers.cloudflare.com/turnstile/troubleshooting/testing/
+ */
+export const TURNSTILE_DUMMY_RESPONSE = "XXXX.DUMMY.TOKEN.XXXX";

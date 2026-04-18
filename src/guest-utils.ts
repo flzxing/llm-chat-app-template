@@ -43,12 +43,21 @@ export async function guestUsernameForDevice(deviceId: string): Promise<string> 
 	return `g_${bytesToHex(digest).slice(0, 28)}`;
 }
 
-export function authRequest(env: Env, pathname: string, body: unknown): Request {
+export function authRequest(
+	env: Env,
+	pathname: string,
+	body: unknown,
+	opts?: { captchaResponse?: string },
+): Request {
 	const base = env.BETTER_AUTH_URL.replace(/\/$/, "");
 	const url = `${base}/api/auth${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+	const headers: Record<string, string> = { "Content-Type": "application/json" };
+	if (opts?.captchaResponse) {
+		headers["x-captcha-response"] = opts.captchaResponse;
+	}
 	return new Request(url, {
 		method: "POST",
-		headers: { "Content-Type": "application/json" },
+		headers,
 		body: JSON.stringify(body),
 	});
 }

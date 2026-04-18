@@ -43,8 +43,21 @@ export async function handleGuestSession(
 	env: Env,
 ): Promise<Response> {
 	try {
-		const body = (await request.json()) as { device_id?: string };
+		const body = (await request.json()) as {
+			device_id?: string;
+			turnstile_token?: string;
+		};
 		const deviceId = body.device_id?.trim();
+		const turnstileToken = body.turnstile_token?.trim();
+		if (!turnstileToken) {
+			return jsonResponse(
+				{
+					error:
+						"turnstile_token required (cf-turnstile-response / widget token for Cloudflare Turnstile)",
+				},
+				400,
+			);
+		}
 		if (!deviceId || !isValidDeviceId(deviceId)) {
 			return jsonResponse(
 				{
@@ -82,7 +95,9 @@ export async function handleGuestSession(
 			const password = await guestPassword(env.BETTER_AUTH_SECRET, deviceId);
 			const auth = createAuth(env);
 			const res = await auth.handler(
-				authRequest(env, "/sign-in/email", { email, password }),
+				authRequest(env, "/sign-in/email", { email, password }, {
+					captchaResponse: turnstileToken,
+				}),
 			);
 			const text = await res.text();
 			const token = tokenFromAuthResponse(res, text);
@@ -103,12 +118,17 @@ export async function handleGuestSession(
 		const auth = createAuth(env);
 
 		const signUpRes = await auth.handler(
-			authRequest(env, "/sign-up/email", {
-				email,
-				password,
-				name: "Guest",
-				username,
-			}),
+			authRequest(
+				env,
+				"/sign-up/email",
+				{
+					email,
+					password,
+					name: "Guest",
+					username,
+				},
+				{ captchaResponse: turnstileToken },
+			),
 		);
 
 		const signUpText = await signUpRes.text();

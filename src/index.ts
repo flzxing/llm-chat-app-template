@@ -20,7 +20,7 @@ app.use(
 	cors({
 		origin: "*",
 		allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-		allowHeaders: ["Content-Type", "Authorization"],
+		allowHeaders: ["Content-Type", "Authorization", "x-captcha-response"],
 		exposeHeaders: ["Content-Length", "set-auth-token", "Set-Auth-Token"],
 	}),
 );

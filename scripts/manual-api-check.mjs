@@ -3,7 +3,8 @@
  * 在 wrangler dev 已启动且本地 D1 已应用 migrations 的前提下，串联验证 API。
  * 用法: BASE_URL=http://127.0.0.1:8787 node scripts/manual-api-check.mjs
  *
- * 需配置 .dev.vars：BETTER_AUTH_SECRET、BETTER_AUTH_URL（与 BASE_URL 同源一致）。
+ * 需配置 .dev.vars：BETTER_AUTH_SECRET、BETTER_AUTH_URL（与 BASE_URL 同源一致）、
+ * TURNSTILE_SECRET_KEY（本地可用 CF 文档中的 dummy secret + dummy token）。
  */
 const base =
 	process.env.BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:8787";
@@ -16,6 +17,9 @@ function authTokenFromResponse(res, bodyText) {
 	);
 }
 
+/** Cloudflare Turnstile 测试文档 dummy token（须与 dummy secret 配对） */
+const TURNSTILE_DUMMY_RESPONSE = "XXXX.DUMMY.TOKEN.XXXX";
+
 async function main() {
 	const username = `manual_${Date.now()}`;
 	const password = "manual-test-12";
@@ -24,7 +28,10 @@ async function main() {
 	console.log("→ POST /api/auth/sign-up/email");
 	const regRes = await fetch(`${base}/api/auth/sign-up/email`, {
 		method: "POST",
-		headers: { "Content-Type": "application/json" },
+		headers: {
+			"Content-Type": "application/json",
+			"x-captcha-response": TURNSTILE_DUMMY_RESPONSE,
+		},
 		body: JSON.stringify({ name: username, email, password, username }),
 	});
 	const regText = await regRes.text();
@@ -41,7 +48,10 @@ async function main() {
 		console.log("→ POST /api/auth/sign-in/username（补取 token）");
 		const loginRes = await fetch(`${base}/api/auth/sign-in/username`, {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: {
+				"Content-Type": "application/json",
+				"x-captcha-response": TURNSTILE_DUMMY_RESPONSE,
+			},
 			body: JSON.stringify({ username, password }),
 		});
 		const loginText = await loginRes.text();

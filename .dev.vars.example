@@ -3,3 +3,6 @@
 BETTER_AUTH_SECRET=请替换为至少32字符的随机密钥
 # 与 wrangler dev 访问地址一致即可
 BETTER_AUTH_URL=http://127.0.0.1:8787
+# Cloudflare Turnstile（Better Auth Captcha）；生产用 wrangler secret put TURNSTILE_SECRET_KEY
+# 本地联调可与客户端同样使用 CF 文档中的 dummy 密钥对：https://developers.cloudflare.com/turnstile/troubleshooting/testing/
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA

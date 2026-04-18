@@ -1,5 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TURNSTILE_DUMMY_RESPONSE } from "../src/constants";
 
 function mockAiStream(): ReadableStream<Uint8Array> {
 	return new ReadableStream({
@@ -20,6 +21,13 @@ function syntheticEmail(username: string): string {
 	return `${username}@example.com`;
 }
 
+function jsonHeadersCaptcha(): Record<string, string> {
+	return {
+		"Content-Type": "application/json",
+		"x-captcha-response": TURNSTILE_DUMMY_RESPONSE,
+	};
+}
+
 function authTokenFromResponse(res: Response, bodyText: string): string {
 	const h =
 		res.headers.get("set-auth-token") ?? res.headers.get("Set-Auth-Token");
@@ -35,7 +43,7 @@ async function signUpUsername(
 ): Promise<{ accessToken: string; userId: string }> {
 	const res = await SELF.fetch("https://example.com/api/auth/sign-up/email", {
 		method: "POST",
-		headers: { "Content-Type": "application/json" },
+		headers: jsonHeadersCaptcha(),
 		body: JSON.stringify({
 			name: username,
 			email: syntheticEmail(username),
@@ -56,7 +64,7 @@ async function signInUsername(
 ): Promise<{ accessToken: string }> {
 	const res = await SELF.fetch("https://example.com/api/auth/sign-in/username", {
 		method: "POST",
-		headers: { "Content-Type": "application/json" },
+		headers: jsonHeadersCaptcha(),
 		body: JSON.stringify({ username, password }),
 	});
 	const text = await res.text();
@@ -82,6 +90,53 @@ describe("API integration (SELF + D1)", () => {
 		});
 		expect(res.status).toBe(204);
 		expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+	});
+
+	it("OPTIONS preflight allows x-captcha-response header", async () => {
+		const res = await SELF.fetch(
+			"https://example.com/api/auth/sign-in/username",
+			{
+				method: "OPTIONS",
+				headers: {
+					Origin: "https://example.com",
+					"Access-Control-Request-Method": "POST",
+					"Access-Control-Request-Headers":
+						"content-type,x-captcha-response",
+				},
+			},
+		);
+		expect(res.status).toBe(204);
+		const allow = res.headers.get("Access-Control-Allow-Headers") ?? "";
+		expect(allow.toLowerCase()).toContain("x-captcha-response");
+	});
+
+	it("sign-up without Turnstile header returns 400 MISSING_RESPONSE", async () => {
+		const res = await SELF.fetch("https://example.com/api/auth/sign-up/email", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				name: "x",
+				email: syntheticEmail("x"),
+				password: "password12",
+				username: uniqueName("nocap"),
+			}),
+		});
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { code?: string };
+		expect(body.code).toBe("MISSING_RESPONSE");
+	});
+
+	it("POST /api/guest/session without turnstile_token returns 400", async () => {
+		const res = await SELF.fetch("https://example.com/api/guest/session", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				device_id: `d_${crypto.randomUUID().replace(/-/g, "")}`,
+			}),
+		});
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error?: string };
+		expect(body.error).toContain("turnstile_token");
 	});
 
 	it("POST /api/chat without Authorization returns 401", async () => {
@@ -116,7 +171,7 @@ describe("API integration (SELF + D1)", () => {
 	it("POST /api/auth/sign-up/email validates password length", async () => {
 		const res = await SELF.fetch("https://example.com/api/auth/sign-up/email", {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: jsonHeadersCaptcha(),
 			body: JSON.stringify({
 				name: "a",
 				email: syntheticEmail("a"),
@@ -133,7 +188,7 @@ describe("API integration (SELF + D1)", () => {
 		const password = "password12";
 		const first = await SELF.fetch("https://example.com/api/auth/sign-up/email", {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: jsonHeadersCaptcha(),
 			body: JSON.stringify({
 				name: user,
 				email: syntheticEmail(user),
@@ -146,7 +201,7 @@ describe("API integration (SELF + D1)", () => {
 
 		const dup = await SELF.fetch("https://example.com/api/auth/sign-up/email", {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: jsonHeadersCaptcha(),
 			body: JSON.stringify({
 				name: user,
 				email: syntheticEmail(user),
@@ -172,7 +227,7 @@ describe("API integration (SELF + D1)", () => {
 			"https://example.com/api/auth/sign-in/username",
 			{
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: jsonHeadersCaptcha(),
 				body: JSON.stringify({ username: user, password: "wrongpass12" }),
 			},
 		);
@@ -304,7 +359,7 @@ describe("API integration (SELF + D1)", () => {
 			"https://example.com/api/auth/sign-in/username",
 			{
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: jsonHeadersCaptcha(),
 				body: JSON.stringify({ username: user, password: "password12" }),
 			},
 		);
@@ -335,7 +390,10 @@ describe("API integration (SELF + D1)", () => {
 		const first = await SELF.fetch("https://example.com/api/guest/session", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ device_id: deviceId }),
+			body: JSON.stringify({
+				device_id: deviceId,
+				turnstile_token: TURNSTILE_DUMMY_RESPONSE,
+			}),
 		});
 		expect(first.status).toBe(200);
 		const j1 = (await first.json()) as {
@@ -351,7 +409,10 @@ describe("API integration (SELF + D1)", () => {
 		const second = await SELF.fetch("https://example.com/api/guest/session", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ device_id: deviceId }),
+			body: JSON.stringify({
+				device_id: deviceId,
+				turnstile_token: TURNSTILE_DUMMY_RESPONSE,
+			}),
 		});
 		expect(second.status).toBe(200);
 		const j2 = (await second.json()) as { userId: string };

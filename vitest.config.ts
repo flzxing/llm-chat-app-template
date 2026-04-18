@@ -27,6 +27,8 @@ export default defineWorkersConfig(async () => {
 							BETTER_AUTH_SECRET:
 								"test-better-auth-secret-for-vitest-min-32-chars!!",
 							BETTER_AUTH_URL: "https://example.com",
+							TURNSTILE_SECRET_KEY:
+								"1x0000000000000000000000000000000AA",
 						},
 					},
 				},

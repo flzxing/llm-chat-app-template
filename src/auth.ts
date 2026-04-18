@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { bearer, username } from "better-auth/plugins";
+import { bearer, captcha, username } from "better-auth/plugins";
 import type { Env } from "./types";
 
 function appOrigin(env: Env): string {
@@ -20,7 +20,20 @@ export function createAuth(env: Env) {
 			enabled: true,
 			autoSignIn: true,
 		},
-		plugins: [bearer(), username()],
+		plugins: [
+			captcha({
+				provider: "cloudflare-turnstile",
+				secretKey: env.TURNSTILE_SECRET_KEY,
+				endpoints: [
+					"/sign-up/email",
+					"/sign-in/email",
+					"/sign-in/username",
+					"/request-password-reset",
+				],
+			}),
+			bearer(),
+			username(),
+		],
 		databaseHooks: {
 			user: {
 				create: {
