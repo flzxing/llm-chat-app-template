@@ -296,6 +296,7 @@ Authorization: Bearer <accessToken>
 ```json
 {
   "model_id": "llama-3.1-8b",
+  "thinking": true,
   "messages": [
     { "role": "user", "content": "你好，给我一句简短问候。" }
   ]
@@ -305,6 +306,7 @@ Authorization: Bearer <accessToken>
 | 字段 | 说明 |
 |------|------|
 | `model_id` | 可选。不传则使用服务端默认模型（当前默认 `llama-3.1-8b`）。须为已上架且启用的逻辑模型 ID。 |
+| `thinking` | 可选，`boolean`。默认 `true`（开启思考模式）。当传 `false` 时，服务端会在支持的模型上转发 `chat_template_kwargs.enable_thinking=false`，用于关闭思考链输出；当前主要对 Qwen 系列生效。 |
 | `messages` | 建议始终传递。元素 `role` 为 `system` \| `user` \| `assistant`，`content` 为文本。若无 `system` 消息，服务端会自动插入一条默认系统提示。 |
 
 ### 成功 `200`
@@ -322,7 +324,7 @@ Authorization: Bearer <accessToken>
   - **`delta.reasoning_content`**：部分推理模型会流式输出思考过程（扩展字段，见 Cloudflare Workers AI 实际输出）  
   - **`delta.tool_calls`**：工具调用时分片到达，需按 OpenAI 流式 tool_calls 规则合并  
 - 首包常带 **`delta.role`**、空 **`content`**；最后一包可能带 **`finish_reason`**。  
-- 完整形态可参考仓库内示例 **`model_reponse_demo.md`**（与 `curl …/ai/run/...` 的 SSE 一致）。
+- **完整字段语义、合并算法与边界情况**见下文 **「附录一：OpenAI 兼容 Chat Completions 流式协议」**；原始 trace 见 **`model_reponse_demo.md`**（与 `curl …/ai/run/...` 的 SSE 形态一致）。
 
 示例（节选，实际以模型为准）：
 
@@ -355,6 +357,172 @@ data: [DONE]
 ### 其他方法
 
 对 `/api/chat` 使用非 `POST` 方法时返回 **`405`**，JSON：`{ "error": "Method not allowed" }`。
+
+---
+
+## 附录一：OpenAI 兼容 Chat Completions 流式协议（客户端解析参考）
+
+本节说明 **`POST /api/chat` 成功时** 响应体的通用解析方式。网关**透传**上游（Workers AI / OpenAI 形态）SSE，字段以实际 chunk 为准；下列结构以 [OpenAI Chat Completions](https://platform.openai.com/docs/api-reference/chat/create) 及常见兼容实现为基准，并标注**厂商扩展**。
+
+### A. 传输层（SSE）
+
+| 项目 | 说明 |
+|------|------|
+| 媒体类型 | `text/event-stream`（UTF-8） |
+| 事件行格式 | 若干行以 **`data: `** 开头；负载为 **单行 JSON**，或字面量 **`[DONE]`**（非 JSON） |
+| 流结束 | 必须处理 **`data: [DONE]`**（含前导空格与否以实现为准，常见为精确字符串 `[DONE]`） |
+| 注释行 | 规范允许 `: comment` 行；多数实现可忽略 |
+
+客户端应按行读取：若以 `data:` 开头，则取其后负载；若为 `[DONE]` 则结束解析循环。
+
+### A.1 响应原文节选（与 `model_reponse_demo.md` 同形，已折叠中间重复分片）
+
+下面是从同一类 Workers AI（OpenAI 兼容 SSE）实测 trace **精简后的原文**：仍含 **`role` 首包**、**少量 `reasoning_content`**、**可见 `content`**、**`tool_calls`（`id`/`name` + `arguments` 多分片）**、**`finish_reason`**、**`choices: []` 用量包**、**`[DONE]`**。真实流里推理与 `arguments` 往往远多于下列行数，合并规则不变。
+
+```text
+data: {"id":"chatcmpl-15a69a9103684dafb11499ce4f587d45","object":"chat.completion.chunk","created":1776510399,"model":"@cf/qwen/qwen3-30b-a3b-fp8","choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}],"usage":{"prompt_tokens":192,"total_tokens":192,"completion_tokens":0}}
+
+data: {"id":"chatcmpl-15a69a9103684dafb11499ce4f587d45","object":"chat.completion.chunk","created":1776510399,"model":"@cf/qwen/qwen3-30b-a3b-fp8","choices":[{"index":0,"delta":{"reasoning_content":"\n"},"logprobs":null,"finish_reason":null,"token_ids":null}],"usage":{"prompt_tokens":192,"total_tokens":194,"completion_tokens":2}}
+
+data: {"id":"chatcmpl-15a69a9103684dafb11499ce4f587d45","object":"chat.completion.chunk","created":1776510399,"model":"@cf/qwen/qwen3-30b-a3b-fp8","choices":[{"index":0,"delta":{"reasoning_content":"Okay"},"logprobs":null,"finish_reason":null,"token_ids":null}],"usage":{"prompt_tokens":192,"total_tokens":195,"completion_tokens":3}}
+
+data: {"id":"chatcmpl-15a69a9103684dafb11499ce4f587d45","object":"chat.completion.chunk","created":1776510399,"model":"@cf/qwen/qwen3-30b-a3b-fp8","choices":[{"index":0,"delta":{"content":"\n\n"},"logprobs":null,"finish_reason":null,"token_ids":null}],"usage":{"prompt_tokens":192,"total_tokens":285,"completion_tokens":93}}
+
+data: {"id":"chatcmpl-15a69a9103684dafb11499ce4f587d45","object":"chat.completion.chunk","created":1776510399,"model":"@cf/qwen/qwen3-30b-a3b-fp8","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-a7348842dffa4c4795f7f8ae2cc1b328","type":"function","index":0,"function":{"name":"add_todo"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}],"usage":{"prompt_tokens":192,"total_tokens":294,"completion_tokens":102}}
+
+data: {"id":"chatcmpl-15a69a9103684dafb11499ce4f587d45","object":"chat.completion.chunk","created":1776510399,"model":"@cf/qwen/qwen3-30b-a3b-fp8","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"task\": \""}}]},"logprobs":null,"finish_reason":null,"token_ids":null}],"usage":{"prompt_tokens":192,"total_tokens":301,"completion_tokens":109}}
+
+data: {"id":"chatcmpl-15a69a9103684dafb11499ce4f587d45","object":"chat.completion.chunk","created":1776510399,"model":"@cf/qwen/qwen3-30b-a3b-fp8","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"go to the library"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}],"usage":{"prompt_tokens":192,"total_tokens":305,"completion_tokens":113}}
+
+data: {"id":"chatcmpl-15a69a9103684dafb11499ce4f587d45","object":"chat.completion.chunk","created":1776510399,"model":"@cf/qwen/qwen3-30b-a3b-fp8","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\",\"time\":\"tomorrow at 2pm\"}"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}],"usage":{"prompt_tokens":192,"total_tokens":318,"completion_tokens":126}}
+
+data: {"id":"chatcmpl-15a69a9103684dafb11499ce4f587d45","object":"chat.completion.chunk","created":1776510399,"model":"@cf/qwen/qwen3-30b-a3b-fp8","choices":[{"index":0,"delta":{"content":""},"logprobs":null,"finish_reason":"tool_calls","stop_reason":null,"token_ids":null}],"usage":{"prompt_tokens":192,"total_tokens":319,"completion_tokens":127}}
+
+data: {"id":"chatcmpl-15a69a9103684dafb11499ce4f587d45","object":"chat.completion.chunk","created":1776510399,"model":"@cf/qwen/qwen3-30b-a3b-fp8","choices":[],"usage":{"prompt_tokens":192,"total_tokens":319,"completion_tokens":127}}
+
+data: [DONE]
+```
+
+**说明**：上述第 7～8 行为展示「`arguments` 可多包拼接」，在 **`model_reponse_demo.md` 全量 trace 中被拆成更多细粒度 token**；拼接后应与 `{\"task\":\"...\",\"time\":\"...\"}` 的 JSON 字符串一致。完整未折叠原文见仓库 **`model_reponse_demo.md`**。
+
+### B. 单个 chunk 的 JSON 形态（`chat.completion.chunk`）
+
+每条 `data:` 负载解析后为对象，常见顶层字段：
+
+| 字段 | 含义 |
+|------|------|
+| `id` | 本次补全的唯一 ID；**同一流内各 chunk 通常相同** |
+| `object` | 固定为 **`chat.completion.chunk`** |
+| `created` | Unix 时间戳（秒） |
+| `model` | 模型标识字符串 |
+| `choices` | **数组**；流式增量在 `choices[i].delta` 中；**可能为空数组**（见下文 usage） |
+| `usage` | **可选**。部分实现仅在最后一包或开启 `stream_options` 时出现；部分实现（如某些 Workers AI 响应）可能在多个 chunk 上携带累计用量——**勿假设只出现一次** |
+
+每个 `choices[]` 元素常见字段：
+
+| 字段 | 含义 |
+|------|------|
+| `index` | 候选序号；单路输出一般为 `0` |
+| `delta` | **增量**：本事件相对上一状态的追加片段（见下节） |
+| `finish_reason` | **终止原因**；流式过程中多为 `null`，结束时有值（见 D 节） |
+| `logprobs` | 若请求了 logprobs，此处可能非 null |
+
+### C. `delta`：正文、推理、拒答、工具调用
+
+`choices[].delta` 表示「本条事件带来的增量」。同一字段在多 chunk 上**字符串类需拼接**，**数组类需按索引合并**。
+
+#### C.1 OpenAI 标准字段
+
+| 字段 | 类型 | 合并规则 |
+|------|------|----------|
+| `role` | string | 通常仅在**靠前**的 chunk 出现一次（如 `assistant`）；可与空 `content` 同包 |
+| `content` | string | **追加拼接**得到助手对用户可见的完整正文 |
+| `refusal` | string | 安全拒答等；若有，按字符串追加理解（具体以模型为准） |
+| `function_call` | object | **已弃用**；由 `tool_calls` 取代；若仍遇到，需兼容 `name` / `arguments` 的流式片段 |
+
+#### C.2 推理 / 思考（**扩展字段**，非全部 OpenAI 模型具备）
+
+| 字段 | 说明 |
+|------|------|
+| `reasoning_content` | **字符串增量**，与 `content` 同样**按 chunk 顺序拼接**。用于展示「链式思考」或内部推理文本（如 Qwen 思考模式、部分 DeepSeek 兼容接口等）。**不得**与面向用户的 `content` 混在同一缓冲区，除非产品刻意合并。 |
+
+本仓库示例 **`model_reponse_demo.md`** 中，Workers AI（`@cf/qwen/...`）先流式输出大量 `delta.reasoning_content`，再出现 `delta.content`，最后流式输出 `delta.tool_calls`。
+
+其他生态中还可能见到 `thinking`、`reasoning` 等别名；**以实际上游为准**，解析器宜做成「可配置字段名」或「多键 fallback」。
+
+#### C.3 `tool_calls`（OpenAI 标准，流式分片）
+
+`delta.tool_calls` 为 **数组**，元素形态与 REST 非流式响应中的 `message.tool_calls` 一致，但在流式中**多次出现且每次只带一部分字段**。
+
+每个元素常见字段：
+
+| 字段 | 说明 |
+|------|------|
+| `index` | **整数**，表示这是第几个工具调用（从 `0` 起）。**合并时的主键** |
+| `id` | 工具调用 ID；**常在首个含该 index 的片段中出现**，后续片段可能省略 |
+| `type` | 一般为 **`function`** |
+| `function` | 对象，含 `name`、`arguments`（均为**可选且分片到达**） |
+
+**合并算法（务必实现）：**
+
+1. 维护一张表，以 **`index`** 为键（或定长数组，长度为当前见到的最大 index+1）。
+2. 对每一个到达的 `delta.tool_calls[]` 元素：
+   - 读取 `index`；
+   - 若出现 `id`、`type`，写入对应槽位；
+   - 对 `function.name`：若本片段带有非空 `name`，写入槽位；
+   - 对 `function.arguments`：**按字符串追加**到该 index 的参数字符串缓冲区（JSON 文本会跨多 chunk）。
+3. 流结束后（`finish_reason` 已出现或收到 `[DONE]`），对每个槽位：
+   - 将 **`arguments` 拼接结果**解析为 JSON 对象（建议 `JSON.parse` 前校验括号闭合；无效则按业务降级）；
+   - 得到完整结构：`{ id, type: "function", function: { name, arguments: <parsed> } }`。
+
+**多工具并行**：不同 `index` 对应不同调用，各自独立拼接 `arguments`。
+
+**与正文的关系**：模型可能先输出可见 `content`，再输出 `tool_calls`；也可能几乎无 `content` 而以 `finish_reason: "tool_calls"` 结束（见 **`model_reponse_demo.md`** 末尾）。
+
+### D. `finish_reason` 与结束语义
+
+常见取值（与 [OpenAI 文档](https://platform.openai.com/docs/api-reference/chat/streaming) 一致）：
+
+| 值 | 含义 |
+|----|------|
+| `null` | 仍在生成 |
+| `stop` | 自然停止 |
+| `length` | 达到最大长度等上限 |
+| `tool_calls` | 模型选择调用工具；此时应已在 delta 中尽量收齐各 `tool_calls` 片段 |
+| `content_filter` | 内容被过滤 |
+| `function_call` | 旧版函数调用停止原因（兼容） |
+
+最后一包可能带有 **`delta.content` 为空字符串** 且 **`finish_reason`** 非空（示例见 `model_reponse_demo.md`）；**必须以 `finish_reason` 与 `[DONE]` 综合判断结束**，不要仅依赖正文非空。
+
+部分实现还会在 choice 上带 **`stop_reason`**（扩展）；可仅作展示或忽略。
+
+### E. 仅含 `usage` 或 `choices: []` 的包
+
+当请求或上游启用了用量回传时，可能出现：
+
+- `choices` 为 **空数组**，仅含 `usage`；
+- 或最后一包在 `choices` 中带 `finish_reason` 的同时再次带 `usage`。
+
+客户端应：**不假设** `choices[0]` 始终存在；访问前判断数组长度。
+
+### F. 客户端状态机建议（极简）
+
+1. 初始化缓冲区：`content_buffer`、`reasoning_buffer`（若需）、`tool_calls_by_index: Map<number, …>`。
+2. 每读一行：若是 JSON chunk，合并各 delta 字段；若是 `[DONE]`，收尾并触发「流完成」回调。
+3. 流完成后：若存在未闭合的 tool call 缓冲区，尝试 `JSON.parse(arguments)`；失败则报错或重试请求。
+4. UI：可同时展示「推理折叠区」（`reasoning_content`）与「助手回复区」（`content`），二者独立滚动与复制。
+
+### G. 官方与扩展对照小结
+
+| 能力 | OpenAI Chat Completions 流式 | 本服务 / Workers AI 常见表现 |
+|------|------------------------------|------------------------------|
+| SSE `data:` + `[DONE]` | 标准 | 一致 |
+| `delta.content` | 标准 | 一致 |
+| `delta.tool_calls` + index 合并 | 标准 | 一致 |
+| `delta.reasoning_content` | **扩展**（官方 chunk 文档未必列出） | Qwen 等模型常见，见 **`model_reponse_demo.md`** |
+| 每 chunk 附带 `usage` | 依 `stream_options` 等 | 可能与 OpenAI 默认略有差异，勿强依赖 |
+
+更完整的原始 trace 见仓库根目录 **`model_reponse_demo.md`**（含推理流式 + `tool_calls` + `finish_reason: "tool_calls"`）。
 
 ---
 

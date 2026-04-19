@@ -7,6 +7,10 @@ import { CORS_HEADERS, jsonResponse } from "./http";
 import { openAiChatCompletionStreamResponse } from "./openai-sse";
 import type { ChatMessage, Env } from "./types";
 
+function supportsThinkingToggle(providerModelId: string): boolean {
+	return providerModelId.startsWith("@cf/qwen/");
+}
+
 type ModelRow = {
 	id: string;
 	provider_model_id: string;
@@ -29,9 +33,11 @@ export async function handleChatRequest(
 		const body = (await request.json()) as {
 			messages?: ChatMessage[];
 			model_id?: string;
+			thinking?: boolean;
 		};
 		const messages = body.messages ?? [];
 		const modelId = body.model_id ?? DEFAULT_CHAT_MODEL_ID;
+		const thinkingEnabled = body.thinking ?? true;
 
 		const model = await env.DB.prepare(
 			"SELECT id, provider_model_id, cost_per_msg, requires_pro FROM models WHERE id = ? AND is_active = 1",
@@ -108,15 +114,22 @@ export async function handleChatRequest(
 		}
 
 		// provider_model_id 来自 D1，运行时与 Workers AI 模型列表对齐；类型上需断言为已绑定模型 key
-		const stream = await env.AI.run(
+		const runInput: Record<string, unknown> = {
+			messages,
+			max_tokens: 1024,
+			stream: true,
+		};
+		if (supportsThinkingToggle(model.provider_model_id)) {
+			runInput.chat_template_kwargs = {
+				enable_thinking: thinkingEnabled,
+			};
+		}
+
+		const stream = (await env.AI.run(
 			model.provider_model_id as keyof AiModels,
-			{
-				messages,
-				max_tokens: 1024,
-				stream: true,
-			},
+			runInput as any,
 			{},
-		);
+		)) as ReadableStream;
 
 		return openAiChatCompletionStreamResponse(stream, {
 			creditsRemaining: balanceAfter,
