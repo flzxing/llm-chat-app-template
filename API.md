@@ -283,7 +283,9 @@ x-captcha-response: <Turnstile token>
 
 **作用**：在会话有效的前提下，按所选模型进行对话，**流式**返回模型输出，并按规则扣减积分。
 
-成功时响应体为 **OpenAI Chat Completions 流式 API** 兼容的 **SSE**（`text/event-stream`）：服务端**透传** Workers AI 返回的字节流，**不在网关侧解析或改写** chunk 内容。客户端应按 OpenAI 约定解析 `data:` 行（含 `data: [DONE]` 结束标记）。非流式错误仍以 JSON 返回。
+服务端通过 Cloudflare 的 **OpenAI 兼容端点** 调用模型：`POST https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`（与官方 `openai-node` 在 `baseURL = .../ai/v1` 下调用 `chat.completions.create` 等价）。需在 Worker 环境配置 **`CLOUDFLARE_ACCOUNT_ID`**（`wrangler.jsonc` 的 `vars`）与 **`CLOUDFLARE_API_KEY`**（`wrangler secret put CLOUDFLARE_API_KEY`，具备 Workers AI 调用权限的 API Token）。
+
+成功时响应体为 **OpenAI Chat Completions 流式 API** 兼容的 **SSE**（`text/event-stream`）：服务端**透传**上游返回的字节流，**不在网关侧解析或改写** chunk 内容。客户端应按 OpenAI 约定解析 `data:` 行（含 `data: [DONE]` 结束标记）。非流式错误仍以 JSON 返回。
 
 ### 请求
 

@@ -4,9 +4,14 @@
 
 export interface Env {
 	/**
-	 * Binding for the Workers AI API.
+	 * Cloudflare 账号 ID（Dashboard URL 或 Workers 子域名对应账户；可写入 vars）。
 	 */
-	AI: Ai;
+	CLOUDFLARE_ACCOUNT_ID: string;
+
+	/**
+	 * 具备 Workers AI / Account 调用权限的 API Token（生产用 `wrangler secret put CLOUDFLARE_API_KEY`）。
+	 */
+	CLOUDFLARE_API_KEY: string;
 
 	/**
 	 * Binding for static assets.

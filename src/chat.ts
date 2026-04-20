@@ -1,7 +1,8 @@
 /**
- * /api/chat：鉴权后按 models 定价扣积分并写 credit_ledger，再调用 Workers AI；
- * 成功时将上游 OpenAI 兼容 SSE 流原样返回（见 openai-sse.ts）。
+ * /api/chat：鉴权后按 models 定价扣积分并写 credit_ledger，再经 Cloudflare **OpenAI 兼容**
+ * `.../ai/v1/chat/completions` 调用模型；成功时将上游 SSE 原样返回（见 openai-sse.ts）。
  */
+import { fetchWorkersAiChatCompletions } from "./cloudflare-ai-openai";
 import { DEFAULT_CHAT_MODEL_ID, SYSTEM_PROMPT } from "./constants";
 import { CORS_HEADERS, jsonResponse } from "./http";
 import { openAiChatCompletionStreamResponse } from "./openai-sse";
@@ -10,6 +11,14 @@ import { DEFAULT_LLM_TOOLS } from "./tools";
 
 function supportsThinkingToggle(providerModelId: string): boolean {
 	return providerModelId.startsWith("@cf/qwen/");
+}
+
+function coerceThinking(value: unknown, defaultEnabled: boolean): boolean {
+	if (value === undefined || value === null) return defaultEnabled;
+	if (typeof value === "boolean") return value;
+	if (value === "false" || value === "0") return false;
+	if (value === "true" || value === "1") return true;
+	return defaultEnabled;
 }
 
 type ModelRow = {
@@ -39,7 +48,17 @@ export async function handleChatRequest(
 		};
 		const messages = body.messages ?? [];
 		const modelId = body.model_id ?? DEFAULT_CHAT_MODEL_ID;
-		const thinkingEnabled = body.thinking ?? true;
+		const thinkingEnabled = coerceThinking(body.thinking, true);
+
+		if (
+			!env.CLOUDFLARE_ACCOUNT_ID?.trim() ||
+			!env.CLOUDFLARE_API_KEY?.trim()
+		) {
+			return jsonResponse(
+				{ error: "Server misconfiguration: Cloudflare AI credentials missing" },
+				500,
+			);
+		}
 		const tools =
 			Array.isArray(body.tools) && body.tools.length > 0
 				? body.tools
@@ -119,24 +138,41 @@ export async function handleChatRequest(
 			messages.unshift({ role: "system", content: SYSTEM_PROMPT });
 		}
 
-		// provider_model_id 来自 D1，运行时与 Workers AI 模型列表对齐；类型上需断言为已绑定模型 key
-		const runInput: Record<string, unknown> = {
+		const completionBody: Record<string, unknown> = {
+			model: model.provider_model_id,
 			messages,
 			max_tokens: 1024,
 			stream: true,
 			tools,
 		};
 		if (supportsThinkingToggle(model.provider_model_id)) {
-			runInput.chat_template_kwargs = {
+			completionBody.chat_template_kwargs = {
 				enable_thinking: thinkingEnabled,
 			};
 		}
 
-		const stream = (await env.AI.run(
-			model.provider_model_id as keyof AiModels,
-			runInput as any,
-			{},
-		)) as ReadableStream;
+		const upstream = await fetchWorkersAiChatCompletions(env, completionBody);
+		if (!upstream.ok) {
+			const detail = await upstream.text();
+			console.error(
+				"Workers AI OpenAI chat/completions error:",
+				upstream.status,
+				detail.slice(0, 500),
+			);
+			return jsonResponse(
+				{
+					error: "Model upstream error",
+					status: upstream.status,
+					detail: detail.slice(0, 2000),
+				},
+				502,
+			);
+		}
+
+		const stream = upstream.body;
+		if (!stream) {
+			return jsonResponse({ error: "Empty upstream response body" }, 502);
+		}
 
 		return openAiChatCompletionStreamResponse(stream, {
 			creditsRemaining: balanceAfter,

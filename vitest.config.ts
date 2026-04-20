@@ -29,6 +29,8 @@ export default defineWorkersConfig(async () => {
 							BETTER_AUTH_URL: "https://example.com",
 							TURNSTILE_SECRET_KEY:
 								"1x0000000000000000000000000000000AA",
+							CLOUDFLARE_ACCOUNT_ID: "test_cf_account_id",
+							CLOUDFLARE_API_KEY: "test_cf_api_token",
 						},
 					},
 				},

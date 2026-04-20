@@ -88,10 +88,26 @@ async function signInUsername(
 }
 
 describe("API integration (SELF + D1)", () => {
+	const origFetch = globalThis.fetch.bind(globalThis);
+
 	beforeEach(() => {
-		vi.spyOn(env.AI, "run").mockImplementation(() =>
-			Promise.resolve(mockAiStream() as never),
-		);
+		vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+			const url =
+				typeof input === "string"
+					? input
+					: input instanceof URL
+						? input.href
+						: input.url;
+			if (url.includes("/ai/v1/chat/completions")) {
+				return Promise.resolve(
+					new Response(mockAiStream(), {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					}),
+				);
+			}
+			return origFetch(input as RequestInfo, init);
+		});
 	});
 
 	afterEach(() => {

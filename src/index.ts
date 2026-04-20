@@ -1,7 +1,7 @@
 /**
  * LLM Chat Application Template
  *
- * Workers AI 流式聊天 + Better Auth（Bearer）+ D1。
+ * Workers AI（OpenAI 兼容 chat/completions）流式聊天 + Better Auth（Bearer）+ D1。
  *
  * @license MIT
  */
