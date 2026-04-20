@@ -1,6 +1,7 @@
 import type { Env } from "./types";
 
-const CHAT_COMPLETIONS_PATH = "/ai/v1/chat/completions";
+/** 与 openai-node 一致：baseURL 已含 `.../ai/v1`，此处只接资源路径 */
+const CHAT_COMPLETIONS_PATH = "/chat/completions";
 
 /**
  * 调用 Cloudflare Workers AI 的 OpenAI 兼容 Chat Completions 端点（与 openai-node 的
