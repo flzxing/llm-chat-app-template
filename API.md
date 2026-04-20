@@ -297,6 +297,23 @@ Authorization: Bearer <accessToken>
 {
   "model_id": "llama-3.1-8b",
   "thinking": true,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "add_todo",
+        "description": "Create a todo item for the user.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "due_time_iso": { "type": "string" }
+          },
+          "required": ["title", "due_time_iso"]
+        }
+      }
+    }
+  ],
   "messages": [
     { "role": "user", "content": "你好，给我一句简短问候。" }
   ]
@@ -307,6 +324,7 @@ Authorization: Bearer <accessToken>
 |------|------|
 | `model_id` | 可选。不传则使用服务端默认模型（当前默认 `llama-3.1-8b`）。须为已上架且启用的逻辑模型 ID。 |
 | `thinking` | 可选，`boolean`。默认 `true`（开启思考模式）。当传 `false` 时，服务端会在支持的模型上转发 `chat_template_kwargs.enable_thinking=false`，用于关闭思考链输出；当前主要对 Qwen 系列生效。 |
+| `tools` | 可选，数组。传入时按你提供的工具定义透传给模型；不传或空数组时，服务端会自动注入内置 4 个工具：`add_todo`、`open_app`、`record_expense`、`generate_image`。 |
 | `messages` | 建议始终传递。元素 `role` 为 `system` \| `user` \| `assistant`，`content` 为文本。若无 `system` 消息，服务端会自动插入一条默认系统提示。 |
 
 ### 成功 `200`

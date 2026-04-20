@@ -6,6 +6,7 @@ import { DEFAULT_CHAT_MODEL_ID, SYSTEM_PROMPT } from "./constants";
 import { CORS_HEADERS, jsonResponse } from "./http";
 import { openAiChatCompletionStreamResponse } from "./openai-sse";
 import type { ChatMessage, Env } from "./types";
+import { DEFAULT_LLM_TOOLS } from "./tools";
 
 function supportsThinkingToggle(providerModelId: string): boolean {
 	return providerModelId.startsWith("@cf/qwen/");
@@ -34,10 +35,15 @@ export async function handleChatRequest(
 			messages?: ChatMessage[];
 			model_id?: string;
 			thinking?: boolean;
+			tools?: unknown[];
 		};
 		const messages = body.messages ?? [];
 		const modelId = body.model_id ?? DEFAULT_CHAT_MODEL_ID;
 		const thinkingEnabled = body.thinking ?? true;
+		const tools =
+			Array.isArray(body.tools) && body.tools.length > 0
+				? body.tools
+				: DEFAULT_LLM_TOOLS;
 
 		const model = await env.DB.prepare(
 			"SELECT id, provider_model_id, cost_per_msg, requires_pro FROM models WHERE id = ? AND is_active = 1",
@@ -118,6 +124,7 @@ export async function handleChatRequest(
 			messages,
 			max_tokens: 1024,
 			stream: true,
+			tools,
 		};
 		if (supportsThinkingToggle(model.provider_model_id)) {
 			runInput.chat_template_kwargs = {
