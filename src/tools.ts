@@ -209,4 +209,79 @@ export const DEFAULT_LLM_TOOLS: ChatToolDefinition[] = [
 			},
 		},
 	},
+	{
+		type: "function",
+		function: {
+			name: "ai_web_search",
+			description:
+				"Search web content for latest information, then return concise findings with sources.",
+			parameters: {
+				type: "object",
+				properties: {
+					query: {
+						type: "string",
+						description: "Search query describing the target topic.",
+						minLength: 2,
+						maxLength: 300,
+					},
+					focus: {
+						type: "string",
+						description:
+							"Optional focus such as 'pricing', 'release note', or 'benchmark'.",
+						maxLength: 80,
+					},
+					max_results: {
+						type: "integer",
+						description: "Maximum number of results to fetch and summarize.",
+						minimum: 1,
+						maximum: 10,
+					},
+					language: {
+						type: "string",
+						enum: ["zh-CN", "en", "auto"],
+						description: "Preferred language for returned summary.",
+					},
+				},
+				required: ["query"],
+				additionalProperties: false,
+			},
+		},
+	},
+	{
+		type: "function",
+		function: {
+			name: "summarize_text",
+			description:
+				"Summarize long text into structured output such as bullets, key points and action items.",
+			parameters: {
+				type: "object",
+				properties: {
+					text: {
+						type: "string",
+						description: "Source text to summarize.",
+						minLength: 1,
+						maxLength: 20000,
+					},
+					style: {
+						type: "string",
+						enum: ["brief", "balanced", "detailed"],
+						description: "Summary detail level.",
+					},
+					output_format: {
+						type: "string",
+						enum: ["paragraph", "bullet_points", "json_outline"],
+						description: "Preferred output format.",
+					},
+					max_tokens: {
+						type: "integer",
+						description: "Optional cap for summary length.",
+						minimum: 64,
+						maximum: 2048,
+					},
+				},
+				required: ["text"],
+				additionalProperties: false,
+			},
+		},
+	},
 ];

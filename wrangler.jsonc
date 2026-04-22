@@ -7,7 +7,10 @@
 	"name": "llm-chat-app-template",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-10-08",
-	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
 	"assets": {
 		"binding": "ASSETS",
 		"directory": "./public"
@@ -16,8 +19,27 @@
 	"vars": {
 		"BETTER_AUTH_URL": "https://llm-chat-app-template.zhouxing87808911.workers.dev",
 		// OpenAI 兼容 Workers AI：`https://api.cloudflare.com/client/v4/accounts/{id}/ai/v1/chat/completions`
-		"CLOUDFLARE_ACCOUNT_ID": "04261ff01cec2227fc3194c65e84a18a"
+		"CLOUDFLARE_ACCOUNT_ID": "04261ff01cec2227fc3194c65e84a18a",
+		"TOOL_EMBED_MODEL": "@cf/baai/bge-base-en-v1.5",
+		"TOOL_RETRIEVAL_TOP_N": "2",
+		"TOOL_RETRIEVAL_TOP_K": "20",
+		"TOOL_RETRIEVAL_SCORE_THRESHOLD": "0.45",
+		"TOOL_VECTORIZE_AUTO_SYNC": "false"
 	},
+	"ai": {
+		"binding": "AI"
+	},
+	"vectorize": [
+		{
+			"binding": "TOOL_INDEX",
+			"index_name": "llm-chat-tools-index"
+		},
+		{
+			"binding": "VECTORIZE",
+			"index_name": "llm-chat-tools-index",
+			"remote": true
+		}
+	],
 	"d1_databases": [
 		{
 			"binding": "DB",

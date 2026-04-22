@@ -18,6 +18,12 @@ export const DEFAULT_CHAT_MODEL_ID = "llama-3.1-8b";
 export const SYSTEM_PROMPT =
 	"You are a helpful, friendly assistant. Provide concise and accurate responses.";
 
+/** 默认工具召回数量（Vectorize 打开时） */
+export const DEFAULT_TOOL_RETRIEVAL_COUNT = 2;
+
+/** Workers AI 默认 embedding 模型（768 维） */
+export const DEFAULT_TOOL_EMBED_MODEL = "@cf/baai/bge-base-en-v1.5";
+
 /**
  * Cloudflare Turnstile 测试文档中的 dummy token，仅与测试 secret `1x0000000000000000000000000000000AA` 配对。
  * @see https://developers.cloudflare.com/turnstile/troubleshooting/testing/

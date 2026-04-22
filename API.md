@@ -326,7 +326,7 @@ Authorization: Bearer <accessToken>
 |------|------|
 | `model_id` | 可选。不传则使用服务端默认模型（当前默认 `llama-3.1-8b`）。须为已上架且启用的逻辑模型 ID。 |
 | `thinking` | 可选，`boolean`。默认 `true`（开启思考模式）。当传 `false` 时，服务端会在支持的模型上转发 `chat_template_kwargs.enable_thinking=false`，用于关闭思考链输出；当前主要对 Qwen 系列生效。 |
-| `tools` | 可选，数组。传入时按你提供的工具定义透传给模型；不传或空数组时，服务端会自动注入内置 4 个工具：`add_todo`、`open_app`、`record_expense`、`generate_image`。 |
+| `tools` | 可选，数组。传入时按你提供的工具定义透传给模型；不传或空数组时，服务端会基于 Vectorize 语义召回默认 `2` 个工具（可配置），候选来自内置 6 个工具：`add_todo`、`open_app`、`record_expense`、`generate_image`、`ai_web_search`、`summarize_text`。召回失败会回退到安全默认工具。 |
 | `messages` | 建议始终传递。元素 `role` 为 `system` \| `user` \| `assistant`，`content` 为文本。若无 `system` 消息，服务端会自动插入一条默认系统提示。 |
 
 ### 成功 `200`
@@ -335,6 +335,8 @@ Authorization: Bearer <accessToken>
 - 重要响应头：  
   - `X-Credits-Remaining`：本次请求完成扣费后的**剩余积分**  
   - `X-Chat-Reference-Id`：本次对话计费关联 ID（对账、客服可查）
+
+服务端会记录工具召回链路日志（embedding 用时、向量查询用时、命中工具列表、是否 fallback），用于线上排障与召回质量调优。
 
 **流式正文（OpenAI 兼容）**
 
@@ -551,6 +553,34 @@ data: [DONE]
 - **`OPTIONS /api/*`**：预检成功一般为 **`204`**。  
 - **未定义的 `/api/...`**：返回 **`404`**，`{ "error": "Not Found" }`。  
 - **非 `/api` 路径**：由静态资源或前端资源策略处理（与 API 文档无关时可忽略）。
+
+---
+
+## 八点五、Vectorize 工具路由运维说明
+
+- 索引创建（需与 embedding 维度一致）：`npx wrangler vectorize create llm-chat-tools-index --dimensions=768 --metric=cosine`
+- 建议创建 metadata index（最多 10 个）：
+  - `npx wrangler vectorize create-metadata-index llm-chat-tools-index --property-name=enabled --type=boolean`
+  - `npx wrangler vectorize create-metadata-index llm-chat-tools-index --property-name=tool_group --type=string`
+  - `npx wrangler vectorize create-metadata-index llm-chat-tools-index --property-name=risk_level --type=string`
+- Worker 通过 `wrangler.jsonc` 绑定：
+  - `ai.binding = "AI"`
+  - `vectorize[].binding = "TOOL_INDEX"`
+- 召回关键配置（`vars`）：
+  - `TOOL_EMBED_MODEL`（默认 `@cf/baai/bge-base-en-v1.5`）
+  - `TOOL_RETRIEVAL_TOP_N`（默认 `2`）
+  - `TOOL_RETRIEVAL_TOP_K`（默认 `20`）
+  - `TOOL_RETRIEVAL_SCORE_THRESHOLD`（默认 `0.45`）
+  - `TOOL_VECTORIZE_AUTO_SYNC`（建议 `false`，避免首个用户触发同步）
+  - `TOOL_INDEX_INIT_KEY`（手动初始化接口密钥）
+- 手动初始化接口（推荐部署后执行一次）：
+  - `POST /api/admin/tool-index/init`
+  - Header: `x-admin-init-key: <TOOL_INDEX_INIT_KEY>`
+  - 成功返回 `mutationId` 与 `toolCount`
+- 初始化状态检查接口：
+  - `GET /api/admin/tool-index/status`
+  - Header: `x-admin-init-key: <TOOL_INDEX_INIT_KEY>`
+  - 返回 `vectorCount`、`dimensions`、`metric`、`expectedToolCount`、`ready`
 
 ---
 

@@ -3,6 +3,18 @@
 BETTER_AUTH_SECRET=请替换为至少32字符的随机密钥
 # 与 wrangler dev 访问地址一致即可
 BETTER_AUTH_URL=http://127.0.0.1:8787
+# 需要具备 Workers AI 调用权限的 Cloudflare API Token（本地调试建议放 .dev.vars）
+CLOUDFLARE_API_KEY=请替换为CloudflareApiToken
+# 账号 ID（通常与 wrangler.jsonc 的 vars 一致；本地可显式声明，避免多账号混淆）
+CLOUDFLARE_ACCOUNT_ID=04261ff01cec2227fc3194c65e84a18a
 # Cloudflare Turnstile（Better Auth Captcha）；生产用 wrangler secret put TURNSTILE_SECRET_KEY
 # 本地联调可与客户端同样使用 CF 文档中的 dummy 密钥对：https://developers.cloudflare.com/turnstile/troubleshooting/testing/
 TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+
+# ---- Vectorize 工具召回（可选覆盖 wrangler.jsonc 的默认值）----
+TOOL_EMBED_MODEL=@cf/baai/bge-base-en-v1.5
+TOOL_RETRIEVAL_TOP_N=2
+TOOL_RETRIEVAL_TOP_K=20
+TOOL_RETRIEVAL_SCORE_THRESHOLD=0.45
+TOOL_VECTORIZE_AUTO_SYNC=false
+TOOL_INDEX_INIT_KEY=请替换为初始化接口密钥

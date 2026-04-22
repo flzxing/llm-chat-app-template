@@ -6,6 +6,7 @@ import { fetchWorkersAiChatCompletions } from "./cloudflare-ai-openai";
 import { DEFAULT_CHAT_MODEL_ID, SYSTEM_PROMPT } from "./constants";
 import { CORS_HEADERS, jsonResponse } from "./http";
 import { openAiChatCompletionStreamResponse } from "./openai-sse";
+import { resolveToolsForQuery } from "./tool-router";
 import type { ChatMessage, Env } from "./types";
 import { DEFAULT_LLM_TOOLS } from "./tools";
 
@@ -59,10 +60,8 @@ export async function handleChatRequest(
 				500,
 			);
 		}
-		const tools =
-			Array.isArray(body.tools) && body.tools.length > 0
-				? body.tools
-				: DEFAULT_LLM_TOOLS;
+		let tools: unknown[] =
+			Array.isArray(body.tools) && body.tools.length > 0 ? body.tools : [];
 
 		const model = await env.DB.prepare(
 			"SELECT id, provider_model_id, cost_per_msg, requires_pro FROM models WHERE id = ? AND is_active = 1",
@@ -137,6 +136,43 @@ export async function handleChatRequest(
 		if (!messages.some((msg) => msg.role === "system")) {
 			messages.unshift({ role: "system", content: SYSTEM_PROMPT });
 		}
+
+		const retrievalStart = Date.now();
+		let toolRoutingDebug:
+			| {
+					usedFallback: boolean;
+					retrievedToolNames: string[];
+					topScore: number | null;
+					embeddingMs: number;
+					queryMs: number;
+					selectedCount: number;
+			  }
+			| undefined;
+		if (tools.length === 0) {
+			try {
+				const resolved = await resolveToolsForQuery(env, messages);
+				tools = resolved.tools;
+				toolRoutingDebug = resolved.debug;
+			} catch (error) {
+				console.error("tool-router.resolve.failed", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+				tools = DEFAULT_LLM_TOOLS.slice(0, 2);
+			}
+		}
+
+		console.log("chat.request", {
+			userId,
+			modelId,
+			toolSelectionSource:
+				Array.isArray(body.tools) && body.tools.length > 0 ? "client" : "router",
+			toolCount: tools.length,
+			toolNames: (tools as Array<{ function?: { name?: string } }>)
+				.map((tool) => tool.function?.name ?? "unknown")
+				.slice(0, 20),
+			retrievalMs: Date.now() - retrievalStart,
+			toolRoutingDebug,
+		});
 
 		const completionBody: Record<string, unknown> = {
 			model: model.provider_model_id,
