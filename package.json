@@ -35,9 +35,11 @@
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
+		"db:local:migrate": "wrangler d1 migrations apply kmp-ai-db --local",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"test:manual": "node scripts/manual-api-check.mjs"
+		"test:manual": "node scripts/manual-api-check.mjs",
+		"test:local:all": "npm run test && npm run test:manual"
 	},
 	"dependencies": {
 		"better-auth": "^1.6.2",

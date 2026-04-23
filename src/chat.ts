@@ -7,8 +7,8 @@ import { DEFAULT_CHAT_MODEL_ID, SYSTEM_PROMPT } from "./constants";
 import { CORS_HEADERS, jsonResponse } from "./http";
 import { openAiChatCompletionStreamResponse } from "./openai-sse";
 import { resolveToolsForQuery } from "./tool-router";
-import type { ChatMessage, Env } from "./types";
 import { DEFAULT_LLM_TOOLS } from "./tools";
+import type { ChatMessage, ChatRequestBody, Env } from "./types";
 
 function supportsThinkingToggle(providerModelId: string): boolean {
 	return providerModelId.startsWith("@cf/qwen/");
@@ -35,21 +35,182 @@ type UserRow = {
 	pro_expires_at: number;
 };
 
+type SessionRow = {
+	id: string;
+	user_id: string;
+};
+
+const HISTORY_LIMIT = 20;
+
+function parseMessageContent(payloadJson: string): string {
+	try {
+		const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
+		const candidate = parsed.text ?? parsed.query ?? parsed.content;
+		if (typeof candidate === "string" && candidate.trim().length > 0) {
+			return candidate.trim();
+		}
+	} catch {
+		// payload_json is a black box for persistence; here we only do best-effort context extraction.
+	}
+	return payloadJson.slice(0, 2000);
+}
+
+function deriveSessionTitle(query: string): string {
+	const title = query.trim().replace(/\s+/g, " ");
+	if (title.length === 0) return "新对话";
+	return title.slice(0, 60);
+}
+
+async function ensureSession(
+	env: Env,
+	userId: string,
+	sessionId: string | null | undefined,
+	query: string,
+): Promise<{ sessionId: string; created: boolean }> {
+	if (!sessionId) {
+		const id = crypto.randomUUID();
+		const ts = Math.floor(Date.now() / 1000);
+		await env.DB.prepare(
+			`INSERT INTO sessions (id, user_id, title, status, created_at, updated_at, last_message_at)
+       VALUES (?, ?, ?, 'active', ?, ?, ?)`,
+		)
+			.bind(id, userId, deriveSessionTitle(query), ts, ts, ts)
+			.run();
+		return { sessionId: id, created: true };
+	}
+
+	const row = await env.DB.prepare("SELECT id, user_id FROM sessions WHERE id = ?")
+		.bind(sessionId)
+		.first<SessionRow>();
+	if (!row) {
+		throw new Error("SESSION_NOT_FOUND");
+	}
+	if (row.user_id !== userId) {
+		throw new Error("SESSION_FORBIDDEN");
+	}
+	return { sessionId, created: false };
+}
+
+async function insertMessageWithSeq(
+	env: Env,
+	args: {
+		sessionId: string;
+		userId: string;
+		role: "user" | "assistant" | "system";
+		typeId: string;
+		payloadJson: string;
+		idempotencyKey?: string;
+	},
+): Promise<{ id: string; seq: number; existed: boolean }> {
+	const createdAt = Math.floor(Date.now() / 1000);
+	const maxRetry = 5;
+	let attempt = 0;
+
+	while (attempt < maxRetry) {
+		attempt += 1;
+		const id = crypto.randomUUID();
+		try {
+			await env.DB.prepare(
+				`INSERT INTO messages (
+          id, session_id, user_id, role, type_id, payload_json, idempotency_key, seq, created_at
+        )
+        VALUES (
+          ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE session_id = ?), ?
+        )`,
+			)
+				.bind(
+					id,
+					args.sessionId,
+					args.userId,
+					args.role,
+					args.typeId,
+					args.payloadJson,
+					args.idempotencyKey ?? null,
+					args.sessionId,
+					createdAt,
+				)
+				.run();
+			const row = await env.DB.prepare("SELECT seq FROM messages WHERE id = ?")
+				.bind(id)
+				.first<{ seq: number }>();
+			return { id, seq: row?.seq ?? 0, existed: false };
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (
+				args.idempotencyKey &&
+				(message.includes("idx_messages_session_idempotency") ||
+					message.includes("messages.session_id, messages.idempotency_key"))
+			) {
+				const existing = await env.DB.prepare(
+					"SELECT id, seq FROM messages WHERE session_id = ? AND idempotency_key = ?",
+				)
+					.bind(args.sessionId, args.idempotencyKey)
+					.first<{ id: string; seq: number }>();
+				if (existing) {
+					return { id: existing.id, seq: existing.seq, existed: true };
+				}
+			}
+			if (!message.includes("UNIQUE constraint failed: messages.session_id, messages.seq")) {
+				throw error;
+			}
+		}
+	}
+	throw new Error("MESSAGE_SEQ_CONFLICT");
+}
+
+async function loadContextMessages(
+	env: Env,
+	sessionId: string,
+): Promise<ChatMessage[]> {
+	const rows = await env.DB.prepare(
+		`SELECT role, payload_json
+     FROM messages
+     WHERE session_id = ?
+     ORDER BY created_at DESC, id DESC
+     LIMIT ?`,
+	)
+		.bind(sessionId, HISTORY_LIMIT)
+		.all<{ role: ChatMessage["role"]; payload_json: string }>();
+	const list = (rows.results ?? [])
+		.reverse()
+		.map((row) => ({ role: row.role, content: parseMessageContent(row.payload_json) }));
+	if (!list.some((msg) => msg.role === "system")) {
+		list.unshift({ role: "system", content: SYSTEM_PROMPT });
+	}
+	return list;
+}
+
 export async function handleChatRequest(
 	request: Request,
 	env: Env,
 	userId: string,
 ): Promise<Response> {
 	try {
-		const body = (await request.json()) as {
-			messages?: ChatMessage[];
-			model_id?: string;
+		const body = (await request.json()) as ChatRequestBody & {
 			thinking?: boolean;
 			tools?: unknown[];
 		};
-		const messages = body.messages ?? [];
+		const query = typeof body.query === "string" ? body.query.trim() : "";
+		const typeId =
+			typeof body.type_id === "string" && body.type_id.trim().length > 0
+				? body.type_id.trim()
+				: "text";
+		const payloadJson = body.payload_json;
+		const idempotencyKey = request.headers.get("x-idempotency-key");
+		if (!query) {
+			return jsonResponse({ error: "query is required" }, 400);
+		}
+		if (typeof payloadJson !== "string") {
+			return jsonResponse({ error: "payload_json must be string" }, 400);
+		}
+		try {
+			JSON.parse(payloadJson);
+		} catch {
+			return jsonResponse({ error: "payload_json must be valid JSON string" }, 400);
+		}
 		const modelId = body.model_id ?? DEFAULT_CHAT_MODEL_ID;
 		const thinkingEnabled = coerceThinking(body.thinking, true);
+		const { sessionId } = await ensureSession(env, userId, body.session_id, query);
 
 		if (
 			!env.CLOUDFLARE_ACCOUNT_ID?.trim() ||
@@ -133,9 +294,25 @@ export async function handleChatRequest(
 			}
 		}
 
-		if (!messages.some((msg) => msg.role === "system")) {
-			messages.unshift({ role: "system", content: SYSTEM_PROMPT });
+		if (!idempotencyKey) {
+			console.warn("chat.idempotency_key.missing", { userId, sessionId });
 		}
+		const userMessage = await insertMessageWithSeq(env, {
+			sessionId,
+			userId,
+			role: "user",
+			typeId,
+			payloadJson,
+			idempotencyKey: idempotencyKey ?? undefined,
+		});
+		const sessionTouchTs = Math.floor(Date.now() / 1000);
+		await env.DB.prepare(
+			"UPDATE sessions SET updated_at = ?, last_message_at = ? WHERE id = ?",
+		)
+			.bind(sessionTouchTs, sessionTouchTs, sessionId)
+			.run();
+
+		const messages = await loadContextMessages(env, sessionId);
 
 		const retrievalStart = Date.now();
 		let toolRoutingDebug:
@@ -163,7 +340,9 @@ export async function handleChatRequest(
 
 		console.log("chat.request", {
 			userId,
+			sessionId,
 			modelId,
+			userMessageId: userMessage.id,
 			toolSelectionSource:
 				Array.isArray(body.tools) && body.tools.length > 0 ? "client" : "router",
 			toolCount: tools.length,
@@ -210,9 +389,102 @@ export async function handleChatRequest(
 			return jsonResponse({ error: "Empty upstream response body" }, 502);
 		}
 
-		return openAiChatCompletionStreamResponse(stream, {
+		const reader = stream.getReader();
+		const passthrough = new TransformStream<Uint8Array, Uint8Array>();
+		const writer = passthrough.writable.getWriter();
+		const decoder = new TextDecoder();
+		let sseCarry = "";
+		let assistantText = "";
+		let sawDoneEvent = false;
+		let streamCompleted = false;
+
+		const pumpPromise = (async () => {
+			try {
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) {
+						streamCompleted = true;
+						break;
+					}
+					if (!value) continue;
+					await writer.write(value);
+					sseCarry += decoder.decode(value, { stream: true });
+					const lines = sseCarry.split("\n");
+					sseCarry = lines.pop() ?? "";
+					for (const line of lines) {
+						const trimmed = line.trim();
+						if (!trimmed.startsWith("data:")) continue;
+						const data = trimmed.slice(5).trim();
+						if (data === "[DONE]") {
+							sawDoneEvent = true;
+							continue;
+						}
+						try {
+							const json = JSON.parse(data) as {
+								choices?: Array<{ delta?: { content?: string } }>;
+							};
+							const delta = json.choices?.[0]?.delta?.content;
+							if (typeof delta === "string") {
+								assistantText += delta;
+							}
+						} catch {
+							// Non-JSON event line; ignore.
+						}
+					}
+				}
+			} catch (error) {
+				console.error("chat.stream.interrupted", {
+					error: error instanceof Error ? error.message : String(error),
+					userId,
+					sessionId,
+				});
+			} finally {
+				try {
+					await writer.close();
+				} catch {
+					// writer may already be closed due to downstream abort.
+				}
+				if (streamCompleted && sawDoneEvent && assistantText.trim().length > 0) {
+					try {
+						const assistantPayload = JSON.stringify({ text: assistantText });
+						await insertMessageWithSeq(env, {
+							sessionId,
+							userId,
+							role: "assistant",
+							typeId: "text",
+							payloadJson: assistantPayload,
+						});
+						const ts = Math.floor(Date.now() / 1000);
+						await env.DB.prepare(
+							"UPDATE sessions SET updated_at = ?, last_message_at = ? WHERE id = ?",
+						)
+							.bind(ts, ts, sessionId)
+							.run();
+					} catch (error) {
+						console.error("chat.assistant.persist.failed", {
+							error: error instanceof Error ? error.message : String(error),
+							userId,
+							sessionId,
+						});
+					}
+				} else {
+					console.warn("chat.assistant.persist.skipped", {
+						userId,
+						sessionId,
+						streamCompleted,
+						sawDoneEvent,
+						hasAssistantContent: assistantText.trim().length > 0,
+					});
+				}
+			}
+		})();
+		void pumpPromise;
+
+		return openAiChatCompletionStreamResponse(passthrough.readable, {
 			creditsRemaining: balanceAfter,
 			referenceId,
+			sessionId,
+			userMessageId: userMessage.id,
 		});
 	} catch (error) {
 		console.error("Error processing chat request:", error);

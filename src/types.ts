@@ -87,3 +87,30 @@ export interface ChatMessage {
 	role: "system" | "user" | "assistant";
 	content: string;
 }
+
+export interface ChatRequestBody {
+	session_id?: string | null;
+	query?: string;
+	type_id?: string;
+	payload_json?: string;
+	model_id?: string;
+}
+
+export interface SessionItem {
+	id: string;
+	title: string;
+	status: string;
+	last_message_at: number | null;
+	created_at: number;
+	updated_at: number;
+}
+
+export interface MessageItem {
+	id: string;
+	session_id: string;
+	role: "system" | "user" | "assistant";
+	type_id: string;
+	payload_json: string;
+	seq: number;
+	created_at: number;
+}

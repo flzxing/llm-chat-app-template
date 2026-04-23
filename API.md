@@ -1,3 +1,346 @@
+# LuckyTool API 文档（当前实现版）
+
+本文档是当前仓库后端实现的单一真相文档，面向：
+- Kotlin Multiplatform 客户端接入
+- 后端持续维护与回归验证
+
+技术栈：Cloudflare Workers + D1 + Better Auth + Workers AI（OpenAI 兼容）。
+
+---
+
+## 1. 总览
+
+### 1.1 Base URL
+- 本地：`http://127.0.0.1:8787`
+- 线上：`https://<your-domain>`
+
+### 1.2 鉴权模型
+- 业务接口（聊天、会话、消息）使用 `Authorization: Bearer <token>`
+- Token 来源：
+  - Better Auth 的响应头：`set-auth-token` / `Set-Auth-Token`
+  - 或响应体里的 `token`
+
+### 1.3 返回格式
+- `POST /api/chat` 成功返回 `text/event-stream`
+- 其他接口成功/失败均返回 JSON
+
+### 1.4 CORS
+- `Access-Control-Allow-Origin: *`
+- `Allow-Methods: GET,POST,PUT,DELETE,OPTIONS`
+- 允许请求头：`Content-Type`, `Authorization`, `x-captcha-response`, `x-admin-init-key`
+- 暴露响应头：
+  - `set-auth-token`, `Set-Auth-Token`
+  - `X-Credits-Remaining`, `X-Chat-Reference-Id`
+  - `X-Session-Id`, `X-User-Message-Id`
+
+---
+
+## 2. 数据契约（客户端核心）
+
+### 2.1 ChatRequest
+`POST /api/chat` 请求体：
+
+```json
+{
+  "session_id": null,
+  "query": "今天上海天气怎么样",
+  "type_id": "text",
+  "payload_json": "{\"text\":\"今天上海天气怎么样\",\"meta\":{\"lang\":\"zh-CN\"}}",
+  "model_id": "llama-3.1-8b",
+  "thinking": true,
+  "tools": []
+}
+```
+
+字段说明：
+- `session_id`: `string | null`，可空。为空时服务端自动创建会话
+- `query`: `string`，必填
+- `type_id`: `string`，可选，默认 `text`
+- `payload_json`: `string`，必填，必须是合法 JSON 字符串；服务端黑盒存储与返回
+- `model_id`: `string`，可选，不传使用默认模型
+- `thinking`: `boolean | "0" | "1" | "true" | "false"`，可选
+- `tools`: `array`，可选；为空时服务端会走工具路由召回
+
+### 2.2 SessionItem
+
+```json
+{
+  "id": "uuid",
+  "title": "新对话",
+  "status": "active",
+  "last_message_at": 1711111111,
+  "created_at": 1711111100,
+  "updated_at": 1711111111
+}
+```
+
+### 2.3 MessageItem
+
+```json
+{
+  "id": "uuid",
+  "session_id": "uuid",
+  "role": "user",
+  "type_id": "text",
+  "payload_json": "{\"text\":\"hello\"}",
+  "seq": 12,
+  "created_at": 1711111111
+}
+```
+
+### 2.4 CursorPage
+
+```json
+{
+  "items": [],
+  "next_cursor": "eyJ0IjoxNzExMTExMTExLCJpZCI6InV1aWQifQ",
+  "has_more": true
+}
+```
+
+`next_cursor` 语义（Base64URL 编码前）：
+
+```json
+{"t":1711111111,"id":"uuid"}
+```
+
+客户端应把 cursor 当作不透明字符串透传，不要自行改写。
+
+---
+
+## 3. 认证接口（Better Auth 透传）
+
+路由：`/api/auth/*`  
+说明：Worker 直接透传 Better Auth handler，不对路径做二次封装。
+
+当前项目常用路径：
+- `POST /api/auth/sign-up/email`
+- `POST /api/auth/sign-in/username`
+- `GET /api/auth/ok`
+
+### 3.1 Turnstile 要求
+- 注册/登录需请求头：`x-captcha-response: <turnstile-token>`
+- 本地可使用 Cloudflare dummy token：`XXXX.DUMMY.TOKEN.XXXX`（需配 dummy secret）
+
+### 3.2 常见错误码
+- `400`：参数校验错误、缺少 captcha
+- `401`：用户名/密码错误
+- `422`：邮箱或用户名冲突
+- `500`：会话创建异常或服务端异常
+
+---
+
+## 4. 游客会话
+
+## `POST /api/guest/session`
+
+### 请求
+
+```json
+{
+  "device_id": "d_3f9fd9adf0a9439a9f6d7e1f7f1a8b20",
+  "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"
+}
+```
+
+约束：
+- `device_id`: 8~128 位，仅 `[a-zA-Z0-9_-]`
+- `turnstile_token`: 必填，必须是 widget 产出的 token（不是 site key / secret）
+
+### 成功响应 `200`
+
+```json
+{
+  "accessToken": "<token>",
+  "userId": "<user-id>",
+  "isGuest": true,
+  "credits": 100
+}
+```
+
+### 失败响应
+- `400`: 参数不合法 / token 错误类型
+- `403`: 设备已绑定正式账号、或账号不可用
+- `500`: 访客会话创建失败
+
+---
+
+## 5. 核心聊天接口
+
+## `POST /api/chat`
+
+鉴权：需要 Bearer token。  
+方法限制：仅 `POST`，`OPTIONS` 返回 `204`，其他方法 `405`。
+
+### 服务端行为
+1. 校验 `query` 与 `payload_json`
+2. `session_id` 为空时自动创建会话
+3. 扣积分并写 `credit_ledger`（按 `models` 配置）
+4. 写入 user 消息（`messages`）
+5. 拉最近 `20` 条历史构建上下文
+6. 调用 Workers AI（OpenAI 兼容）并流式返回
+7. 流结束后仅在以下条件同时满足才写 assistant 消息：
+   - 上游流读取完成
+   - 收到 `[DONE]`
+   - assistant 内容非空
+
+### 成功响应
+- `200 text/event-stream`
+- 关键响应头：
+  - `X-Credits-Remaining`
+  - `X-Chat-Reference-Id`
+  - `X-Session-Id`
+  - `X-User-Message-Id`
+
+### 失败响应（JSON）
+- `400`:
+  - `query is required`
+  - `payload_json must be string`
+  - `payload_json must be valid JSON string`
+  - `Unknown or inactive model`
+- `401`:
+  - `Unauthorized`
+  - `User not found`
+- `402`: `Insufficient credits`
+- `403`:
+  - `Account disabled`
+  - `This model requires an active Pro subscription`
+- `500`: 配置错误或内部错误
+- `502`: 上游模型错误（`Model upstream error` / `Empty upstream response body`）
+
+### 幂等与并发
+- 可选请求头：`x-idempotency-key`
+- 同一 `session_id + idempotency_key` 会去重 user 消息
+- 会话内消息顺序使用 `seq`，并通过唯一约束避免并发乱序
+
+---
+
+## 6. 会话管理
+
+鉴权：全部需要 Bearer token。
+
+## `GET /api/sessions`
+
+查询参数：
+- `cursor`（可选）
+- `limit`（可选，默认 20，最大 100）
+
+响应：
+
+```json
+{
+  "items": [/* SessionItem[] */],
+  "next_cursor": "<cursor-or-null>",
+  "has_more": true
+}
+```
+
+排序：`updated_at DESC, id DESC`。
+
+## `PUT /api/sessions/:id`
+
+请求体：
+
+```json
+{ "title": "新的标题" }
+```
+
+约束：
+- 标题长度 1~120
+
+响应：
+- `200 { "ok": true }`
+- `400` 标题不合法
+- `404` 会话不存在或无权限
+
+## `DELETE /api/sessions/:id`
+
+响应：
+- `200 { "ok": true }`
+- `404` 会话不存在或无权限
+
+说明：删除会触发消息级联删除（DB 外键 `ON DELETE CASCADE`）。
+
+---
+
+## 7. 消息管理
+
+鉴权：全部需要 Bearer token。
+
+## `GET /api/messages`
+
+查询参数：
+- `session_id`（必填）
+- `cursor`（可选）
+- `limit`（可选，默认 30，最大 100）
+- `offset`（禁止；传入会返回 400）
+
+响应：
+
+```json
+{
+  "items": [/* MessageItem[] */],
+  "next_cursor": "<cursor-or-null>",
+  "has_more": true
+}
+```
+
+排序：`created_at DESC, id DESC`。
+
+错误：
+- `400`: `session_id is required` / `offset pagination is not supported`
+- `404`: 会话不存在或无权限
+
+## `DELETE /api/messages/:id`
+
+响应：
+- `200 { "ok": true }`
+- `404` 消息不存在或无权限
+
+行为：删除后会刷新所属 session 的 `updated_at`。
+
+---
+
+## 8. 工具索引管理（管理员）
+
+## `POST /api/admin/tool-index/init`
+## `GET /api/admin/tool-index/status`
+
+请求头：
+- `x-admin-init-key: <TOOL_INDEX_INIT_KEY>`
+
+响应：
+- 未授权：`401 { "error": "Unauthorized" }`
+- 成功：`200 { "ok": true, ... }`
+- 失败：`500`
+
+---
+
+## 9. 通用状态码约定
+
+- `200`: 成功
+- `204`: OPTIONS 预检成功
+- `400`: 参数错误 / 输入不合法
+- `401`: 未认证或认证失败
+- `402`: 积分不足
+- `403`: 禁止访问
+- `404`: 资源不存在
+- `405`: 方法不允许
+- `422`: 认证注册类冲突（Better Auth）
+- `500`: 服务端错误
+- `502`: 上游模型错误
+
+---
+
+## 10. 本地联调建议
+
+1. `cp .dev.vars.example .dev.vars`
+2. `npm run db:local:migrate`
+3. `npm run dev`
+4. `npm run test:manual`
+5. `npm run test`
+
+`test:manual` 会跑注册、登录、聊天、会话、消息、游客流程，并默认在末尾删除会话数据用于保持环境干净。
 # LLM Chat App API 接口文档
 
 本文档描述客户端（移动端、桌面端、脚本等）如何调用本服务：**完成身份识别、会话保持、按积分计费的对话能力**。侧重「这些接口分别解决什么问题、如何组合使用」，不展开服务端实现细节。
@@ -657,3 +1000,92 @@ curl -N --max-time 60 -X POST "$BASE/api/chat" \
 | 无 Turnstile | 注册 / 用户名登录 / 游客会话须配合 **Cloudflare Turnstile**（请求头 **`x-captcha-response`** 或游客 **`turnstile_token`**）；服务端 **`TURNSTILE_SECRET_KEY`** |
 
 若你维护多环境，请同时确认**线上部署版本**与本文档一致（发布前的检查项由团队内部清单另行维护即可）。**切勿**在仓库或聊天中泄露 Turnstile **Secret Key**；若已泄露请在 Cloudflare 控制台**轮换密钥**。
+
+---
+
+## 十二、KMP 云端会话 DTO（2026 架构升级）
+
+本节是 LuckyTool Kotlin Multiplatform 客户端建议直接对齐的最小契约，强调服务端托管上下文、游标分页与黑盒 payload。
+
+### 12.1 ChatRequest（隐式建会话）
+
+`POST /api/chat` 请求体：
+
+```json
+{
+  "session_id": null,
+  "query": "帮我记录一条明天早上买咖啡",
+  "type_id": "text",
+  "payload_json": "{\"text\":\"帮我记录一条明天早上买咖啡\",\"timezone\":\"Asia/Shanghai\"}",
+  "model_id": "llama-3.1-8b"
+}
+```
+
+- `session_id`：可空。为空时服务端自动创建会话。
+- `query`：必填，用于即时推理输入。
+- `type_id`：可选，默认 `text`。
+- `payload_json`：必填字符串，服务端黑盒存储并原样返回。
+
+成功时响应头新增：
+
+- `X-Session-Id`：服务端确认的会话 ID（首发时用于落地本地状态）。
+- `X-User-Message-Id`：本次用户消息 ID。
+- `X-Credits-Remaining`、`X-Chat-Reference-Id`：同旧版。
+
+### 12.2 SessionItem 与会话管理
+
+- `GET /api/sessions?cursor=<base64url>&limit=20`
+- `PUT /api/sessions/:id`（body: `{ "title": "xxx" }`）
+- `DELETE /api/sessions/:id`
+
+`SessionItem`：
+
+```json
+{
+  "id": "uuid",
+  "title": "新对话",
+  "status": "active",
+  "last_message_at": 1711111111,
+  "created_at": 1711111100,
+  "updated_at": 1711111111
+}
+```
+
+### 12.3 MessageItem 与消息管理
+
+- `GET /api/messages?session_id=<id>&cursor=<base64url>&limit=30`
+- `DELETE /api/messages/:id`
+
+`MessageItem`：
+
+```json
+{
+  "id": "uuid",
+  "session_id": "uuid",
+  "role": "user",
+  "type_id": "text",
+  "payload_json": "{\"text\":\"hello\"}",
+  "seq": 12,
+  "created_at": 1711111111
+}
+```
+
+### 12.4 CursorPage 编码
+
+分页响应统一形态：
+
+```json
+{
+  "items": [],
+  "next_cursor": "eyJ0IjoxNzExMTExMTExLCJpZCI6InV1aWQifQ",
+  "has_more": true
+}
+```
+
+`next_cursor` 的明文语义为：
+
+```json
+{"t":1711111111,"id":"uuid"}
+```
+
+再做 Base64URL 编码（无 `=` 补位）。KMP 侧应把 `cursor` 当作不透明字符串回传，不做业务解释。

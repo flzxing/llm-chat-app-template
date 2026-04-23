@@ -2,7 +2,7 @@
 -- + 业务表 user_profiles / models / 流水与对话
 
 DROP TABLE IF EXISTS messages;
-DROP TABLE IF EXISTS conversations;
+DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS credit_ledger;
 DROP TABLE IF EXISTS user_profiles;
 DROP TABLE IF EXISTS session;
@@ -110,22 +110,41 @@ CREATE TABLE credit_ledger (
 
 CREATE INDEX IF NOT EXISTS idx_ledger_user ON credit_ledger (user_id);
 
-CREATE TABLE conversations (
+CREATE TABLE sessions (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES user_profiles (user_id) ON DELETE CASCADE,
-    title TEXT DEFAULT '新对话',
-    model_id TEXT NOT NULL,
-    created_at INTEGER DEFAULT (CAST(strftime('%s', 'now') AS INTEGER)),
-    updated_at INTEGER DEFAULT (CAST(strftime('%s', 'now') AS INTEGER))
+    user_id TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT '新对话',
+    status TEXT NOT NULL DEFAULT 'active',
+    last_message_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', 'now') AS INTEGER)),
+    updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', 'now') AS INTEGER))
 );
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user_updated
+ON sessions (user_id, updated_at DESC, id DESC);
 
 CREATE TABLE messages (
     id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    tokens_used INTEGER DEFAULT 0,
-    created_at INTEGER DEFAULT (CAST(strftime('%s', 'now') AS INTEGER))
+    session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    type_id TEXT NOT NULL DEFAULT 'text',
+    payload_json TEXT NOT NULL,
+    idempotency_key TEXT,
+    seq INTEGER NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', 'now') AS INTEGER)),
+    UNIQUE (session_id, seq)
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages (conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_session_created
+ON messages (session_id, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_messages_session_seq
+ON messages (session_id, seq DESC);
+
+CREATE INDEX IF NOT EXISTS idx_messages_user_session
+ON messages (user_id, session_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_session_idempotency
+ON messages (session_id, idempotency_key)
+WHERE idempotency_key IS NOT NULL;

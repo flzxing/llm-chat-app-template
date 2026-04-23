@@ -66,6 +66,48 @@ This will start a local server at http://localhost:8787.
 
 Note: Using Workers AI accesses your Cloudflare account even during local development, which will incur usage charges.
 
+### Local End-to-End Workflow (Wrangler + D1)
+
+Run the full flow locally: local deploy, local D1 migrations, register/login/chat/session/message operations.
+
+1. Copy env file and fill required values:
+
+```bash
+cp .dev.vars.example .dev.vars
+```
+
+2. Apply D1 migrations to local DB:
+
+```bash
+npm run db:local:migrate
+```
+
+3. Start local worker:
+
+```bash
+npm run dev
+```
+
+4. In another terminal, run automated local API smoke test:
+
+```bash
+npm run test:manual
+```
+
+The script verifies:
+- Sign-up and sign-in
+- `POST /api/chat` with implicit session creation
+- Session listing + rename + delete
+- Message listing + delete
+- Guest session creation
+- Unauthorized access guard
+
+5. Run full local test suite:
+
+```bash
+npm run test
+```
+
 ### Deployment
 
 Deploy to Cloudflare Workers:

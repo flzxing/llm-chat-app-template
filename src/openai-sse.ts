@@ -17,6 +17,8 @@ const OPENAI_CHAT_STREAM_HEADERS: Record<string, string> = {
 export type OpenAiSsePassthroughOptions = {
 	creditsRemaining: number | string;
 	referenceId: string;
+	sessionId: string;
+	userMessageId: string;
 };
 
 /**
@@ -31,6 +33,8 @@ export function openAiChatCompletionStreamResponse(
 			...OPENAI_CHAT_STREAM_HEADERS,
 			"X-Credits-Remaining": String(options.creditsRemaining),
 			"X-Chat-Reference-Id": options.referenceId,
+			"X-Session-Id": options.sessionId,
+			"X-User-Message-Id": options.userMessageId,
 			...CORS_HEADERS,
 		},
 	});

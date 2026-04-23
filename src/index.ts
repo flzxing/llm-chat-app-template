@@ -10,7 +10,13 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { createAuth } from "./auth";
 import { handleChatRequest } from "./chat";
+import { handleDeleteMessage, handleListMessages } from "./routes/messages";
 import { handleGuestSession } from "./routes/guest";
+import {
+	handleDeleteSession,
+	handleListSessions,
+	handleUpdateSessionTitle,
+} from "./routes/sessions";
 import { getToolIndexStatus, initializeToolIndex } from "./tool-router";
 import type { Env } from "./types";
 
@@ -33,6 +39,8 @@ app.use(
 			"Set-Auth-Token",
 			"X-Credits-Remaining",
 			"X-Chat-Reference-Id",
+			"X-Session-Id",
+			"X-User-Message-Id",
 		],
 	}),
 );
@@ -83,6 +91,48 @@ app.all("/api/chat", async (c) => {
 		return c.json({ error: "Unauthorized" }, 401);
 	}
 	return handleChatRequest(c.req.raw.clone(), c.env, session.user.id);
+});
+
+app.all("/api/sessions", async (c) => {
+	if (c.req.method === "OPTIONS") return c.body(null, 204);
+	if (c.req.method !== "GET") return c.json({ error: "Method not allowed" }, 405);
+	const auth = createAuth(c.env);
+	const session = await auth.api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.json({ error: "Unauthorized" }, 401);
+	return handleListSessions(c.req.raw, c.env, session.user.id);
+});
+
+app.all("/api/sessions/:id", async (c) => {
+	if (c.req.method === "OPTIONS") return c.body(null, 204);
+	const auth = createAuth(c.env);
+	const session = await auth.api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.json({ error: "Unauthorized" }, 401);
+	const sessionId = c.req.param("id");
+	if (c.req.method === "PUT") {
+		return handleUpdateSessionTitle(c.req.raw, c.env, session.user.id, sessionId);
+	}
+	if (c.req.method === "DELETE") {
+		return handleDeleteSession(c.env, session.user.id, sessionId);
+	}
+	return c.json({ error: "Method not allowed" }, 405);
+});
+
+app.all("/api/messages", async (c) => {
+	if (c.req.method === "OPTIONS") return c.body(null, 204);
+	if (c.req.method !== "GET") return c.json({ error: "Method not allowed" }, 405);
+	const auth = createAuth(c.env);
+	const session = await auth.api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.json({ error: "Unauthorized" }, 401);
+	return handleListMessages(c.req.raw, c.env, session.user.id);
+});
+
+app.all("/api/messages/:id", async (c) => {
+	if (c.req.method === "OPTIONS") return c.body(null, 204);
+	if (c.req.method !== "DELETE") return c.json({ error: "Method not allowed" }, 405);
+	const auth = createAuth(c.env);
+	const session = await auth.api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.json({ error: "Unauthorized" }, 401);
+	return handleDeleteMessage(c.env, session.user.id, c.req.param("id"));
 });
 
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
