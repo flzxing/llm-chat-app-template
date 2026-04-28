@@ -50,6 +50,24 @@ export interface Env {
 	TURNSTILE_SECRET_KEY: string;
 
 	/**
+	 * Resend API Key（用于发送邮箱 OTP）。
+	 * 生产环境建议 `wrangler secret put RESEND_API_KEY`。
+	 */
+	RESEND_API_KEY: string;
+
+	/**
+	 * OTP 发件邮箱（须为 Resend 已验证域）。
+	 * 示例：`no-reply@your-domain.com`
+	 */
+	RESEND_FROM_EMAIL: string;
+
+	/**
+	 * 可选：OTP 发件人名称。
+	 * 示例：`LLM Chat App`
+	 */
+	RESEND_FROM_NAME?: string;
+
+	/**
 	 * 可选：工具 embedding 模型 ID（默认 @cf/baai/bge-base-en-v1.5）。
 	 */
 	TOOL_EMBED_MODEL?: string;

@@ -10,6 +10,12 @@ CLOUDFLARE_ACCOUNT_ID=04261ff01cec2227fc3194c65e84a18a
 # Cloudflare Turnstile（Better Auth Captcha）；生产用 wrangler secret put TURNSTILE_SECRET_KEY
 # 本地联调可与客户端同样使用 CF 文档中的 dummy 密钥对：https://developers.cloudflare.com/turnstile/troubleshooting/testing/
 TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+# Resend API Key（OTP 邮件发送）
+RESEND_API_KEY=re_xxxxxxxxx
+# Resend 已验证域的发件邮箱（不能用未验证地址）
+RESEND_FROM_EMAIL=no-reply@example.com
+# 可选：发件显示名
+RESEND_FROM_NAME=LLM Chat App
 
 # ---- Vectorize 工具召回（可选覆盖 wrangler.jsonc 的默认值）----
 TOOL_EMBED_MODEL=@cf/baai/bge-base-en-v1.5

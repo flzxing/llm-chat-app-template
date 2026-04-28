@@ -20,6 +20,10 @@
 		"BETTER_AUTH_URL": "https://llm-chat-app-template.zhouxing87808911.workers.dev",
 		// OpenAI 兼容 Workers AI：`https://api.cloudflare.com/client/v4/accounts/{id}/ai/v1/chat/completions`
 		"CLOUDFLARE_ACCOUNT_ID": "04261ff01cec2227fc3194c65e84a18a",
+		// OTP 邮件发件地址（Resend verified domain）；RESEND_API_KEY 请用 secret 注入
+		"RESEND_FROM_EMAIL": "no-reply@luckyaitool.com",
+		// 可选：发件人展示名
+		"RESEND_FROM_NAME": "LLM Chat App",
 		"TOOL_EMBED_MODEL": "@cf/baai/bge-base-en-v1.5",
 		"TOOL_RETRIEVAL_TOP_N": "2",
 		"TOOL_RETRIEVAL_TOP_K": "20",

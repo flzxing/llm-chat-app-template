@@ -37,6 +37,8 @@ async function main() {
 	const username = `manual_${Date.now()}`;
 	const password = "manual-test-12";
 	const email = `${username}@example.com`;
+	const otpEmail = process.env.MANUAL_OTP_EMAIL || email;
+	const otpCode = process.env.MANUAL_OTP_CODE || "";
 
 	console.log("→ 1) 注册: POST /api/auth/sign-up/email");
 	const regRes = await fetch(`${base}/api/auth/sign-up/email`, {
@@ -209,6 +211,42 @@ async function main() {
 	console.log("  status:", noAuth.status, await noAuth.text());
 	if (noAuth.status !== 401) {
 		throw new Error(`expected 401 without auth, got ${noAuth.status}`);
+	}
+
+	console.log("→ 12) 发送登录 OTP: POST /api/auth/email-otp/send-verification-otp");
+	const otpSend = await fetch(`${base}/api/auth/email-otp/send-verification-otp`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"x-captcha-response": TURNSTILE_DUMMY_RESPONSE,
+			Origin: origin,
+		},
+		body: JSON.stringify({ email: otpEmail, type: "sign-in" }),
+	});
+	const { text: otpSendText } = await parseJsonSafe(otpSend);
+	assertOk(otpSend, otpSendText, "send OTP failed");
+	console.log("  otp_email:", otpEmail);
+
+	if (otpCode) {
+		console.log("→ 13) 使用 OTP 登录: POST /api/auth/sign-in/email-otp");
+		const otpSignIn = await fetch(`${base}/api/auth/sign-in/email-otp`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				"x-captcha-response": TURNSTILE_DUMMY_RESPONSE,
+				Origin: origin,
+			},
+			body: JSON.stringify({ email: otpEmail, otp: otpCode }),
+		});
+		const { text: otpSignInText } = await parseJsonSafe(otpSignIn);
+		assertOk(otpSignIn, otpSignInText, "OTP sign-in failed");
+		const otpToken = authTokenFromResponse(otpSignIn, otpSignInText);
+		if (!otpToken) throw new Error("no token after OTP sign-in");
+		console.log("  otp_signin_ok: true");
+	} else {
+		console.log(
+			"  skip OTP sign-in (set MANUAL_OTP_CODE=<验证码> to verify /sign-in/email-otp)",
+		);
 	}
 
 	console.log("\n本地全链路验证完成。");

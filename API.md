@@ -116,16 +116,19 @@
 当前项目常用路径：
 - `POST /api/auth/sign-up/email`
 - `POST /api/auth/sign-in/username`
+- `POST /api/auth/email-otp/send-verification-otp`
+- `POST /api/auth/sign-in/email-otp`
 - `GET /api/auth/ok`
 
 ### 3.1 Turnstile 要求
-- 注册/登录需请求头：`x-captcha-response: <turnstile-token>`
+- 注册/登录/OTP 发送与 OTP 登录需请求头：`x-captcha-response: <turnstile-token>`
 - 本地可使用 Cloudflare dummy token：`XXXX.DUMMY.TOKEN.XXXX`（需配 dummy secret）
 
 ### 3.2 常见错误码
-- `400`：参数校验错误、缺少 captcha
+- `400`：参数校验错误、缺少 captcha、OTP 错误或过期
 - `401`：用户名/密码错误
 - `422`：邮箱或用户名冲突
+- `429`/`400`：OTP 尝试次数超限（错误码通常包含 `TOO_MANY_ATTEMPTS`）
 - `500`：会话创建异常或服务端异常
 
 ---
@@ -379,7 +382,7 @@
 
 - **只想快速试用、不注册**：应用启动时用持久化的 `device_id` 调用 **`POST /api/guest/session`**，得到 `accessToken` + `userId` + 当前 `credits`（游客）。
 - **正式注册**：调用账号服务里的 **`POST /api/auth/sign-up/email`**，提交用户名、密码、邮箱、显示名等；成功后响应里会带有会话令牌（见下文「令牌从哪里读」）。
-- **老用户回来**：调用 **`POST /api/auth/sign-in/username`**，用用户名 + 密码换取新的会话令牌。
+- **老用户回来**：可调用 **`POST /api/auth/sign-in/username`**（用户名 + 密码）或邮箱 OTP 流程（先 `POST /api/auth/email-otp/send-verification-otp`，再 `POST /api/auth/sign-in/email-otp`）换取新的会话令牌。
 
 游客与正式用户共用**同一种** Bearer 用法：后续请求都带 `Authorization: Bearer <accessToken>`。
 
@@ -396,7 +399,7 @@
 
 ### 1.4 注册时「邮箱」在业务上怎么用
 
-注册接口要求携带 **邮箱字段**（协议与风控上的常见要求）。若你的产品短期内不打算发邮件，可以采用**应用内约定格式**的占位邮箱（例如 `{username}@你的应用专用域` 或自有后缀），只要保证**全局不与他人重复**即可；登录仍以 **username + 密码** 为主（**`POST /api/auth/sign-in/username`**）。
+注册接口要求携带 **邮箱字段**（协议与风控上的常见要求）。若产品对邮箱 OTP 登录有启用计划，建议使用真实可达邮箱；否则可采用**应用内约定格式**的占位邮箱（例如 `{username}@你的应用专用域` 或自有后缀），只要保证**全局不与他人重复**即可。当前登录支持 **username + 密码**（`POST /api/auth/sign-in/username`）与 **邮箱 + OTP**（`POST /api/auth/sign-in/email-otp`）。
 
 ### 1.5 令牌过期与重试策略（客户端建议）
 
@@ -616,7 +619,85 @@ x-captcha-response: <Turnstile token>
 
 ---
 
-### 6.4 其他 `/api/auth/*` 能力
+### 6.4 发送邮箱 OTP（登录）— `POST /api/auth/email-otp/send-verification-otp`
+
+**作用**：向邮箱发送一次性验证码（OTP），用于后续 `email + otp` 登录。
+
+#### 请求头（必填）
+
+```http
+Content-Type: application/json
+x-captcha-response: <Turnstile token>
+```
+
+#### 请求体（必填）
+
+```json
+{
+  "email": "alice@example.com",
+  "type": "sign-in"
+}
+```
+
+说明：
+- 当前登录场景固定使用 `type: "sign-in"`。
+- 响应成功仅表示「发送流程已受理」，不代表邮箱一定即时到达。
+
+#### 成功 `200`
+
+```json
+{
+  "status": true
+}
+```
+
+#### 失败示例
+
+| 状态 | 说明 |
+|------|------|
+| `400` | 缺少/无效参数，或缺少 Turnstile |
+| `403` | Turnstile 校验失败 |
+| `500` | OTP 邮件通道异常 |
+
+---
+
+### 6.5 OTP 登录（邮箱 + 验证码）— `POST /api/auth/sign-in/email-otp`
+
+**作用**：通过邮箱与 OTP 完成登录并签发会话令牌。  
+若邮箱尚未注册，按当前策略会自动创建账号（Better Auth `disableSignUp: false` 默认行为）。
+
+#### 请求头（必填）
+
+```http
+Content-Type: application/json
+x-captcha-response: <Turnstile token>
+```
+
+#### 请求体（必填）
+
+```json
+{
+  "email": "alice@example.com",
+  "otp": "123456"
+}
+```
+
+#### 成功 `200`
+
+- 响应体包含 `token`、`user` 等字段；也可能通过响应头 `set-auth-token` 返回令牌。
+- 客户端读取令牌后可直接访问业务 API：`Authorization: Bearer <token>`。
+
+#### 失败示例
+
+| 状态 | 说明 |
+|------|------|
+| `400` | OTP 错误、OTP 过期、缺少 captcha |
+| `403` | Turnstile 校验失败 |
+| `400`/`429` | 验证次数超过上限（错误码常见 `TOO_MANY_ATTEMPTS`） |
+
+---
+
+### 6.6 其他 `/api/auth/*` 能力
 
 同一前缀下还可能提供会话查询、退出登录、修改资料等**标准账号能力**；是否启用以你当前部署为准。本产品在业务上**必须对接**的主要是：**注册**、**用户名登录**、**健康检查**，以及下文的**聊天**。
 
@@ -937,7 +1018,8 @@ data: [DONE]
    - 调 **`POST /api/auth/sign-up/email`**（请求头带 **`x-captcha-response`**），保存返回的令牌与 `user.id`（即业务上的 `userId`）。
 
 3. **已登录用户再次进入**  
-   - 调 **`POST /api/auth/sign-in/username`**（请求头带 **`x-captcha-response`**）刷新令牌；本地令牌失效时重复此步。
+   - 用户名密码：调 **`POST /api/auth/sign-in/username`**（请求头带 **`x-captcha-response`**）刷新令牌。  
+   - 邮箱 OTP：先调 **`POST /api/auth/email-otp/send-verification-otp`**（`type: "sign-in"`），再调 **`POST /api/auth/sign-in/email-otp`**。
 
 4. **对话**  
    - 所有 **`POST /api/chat`** 请求携带 `Authorization: Bearer <accessToken>`。  
@@ -980,6 +1062,18 @@ curl -sS -X POST "$BASE/api/auth/sign-in/username" \
   -H "x-captcha-response: $CAPTCHA" \
   -d '{"username":"alice","password":"Yourpass12"}'
 
+# 发送登录 OTP（邮箱）
+curl -sS -X POST "$BASE/api/auth/email-otp/send-verification-otp" \
+  -H "Content-Type: application/json" \
+  -H "x-captcha-response: $CAPTCHA" \
+  -d '{"email":"alice@example.com","type":"sign-in"}'
+
+# OTP 登录（邮箱 + 验证码）
+curl -sS -X POST "$BASE/api/auth/sign-in/email-otp" \
+  -H "Content-Type: application/json" \
+  -H "x-captcha-response: $CAPTCHA" \
+  -d '{"email":"alice@example.com","otp":"123456"}'
+
 # 聊天（将 TOKEN 换为 accessToken 或响应中的 token）
 curl -N --max-time 60 -X POST "$BASE/api/chat" \
   -H "Content-Type: application/json" \
@@ -993,11 +1087,11 @@ curl -N --max-time 60 -X POST "$BASE/api/chat" \
 
 | 旧版 | 现行 |
 |------|------|
-| `POST /api/register` / `/api/login` / `/api/refresh` | 使用 **`/api/auth/sign-up/email`**、**`/api/auth/sign-in/username`**；**无 refresh 路径**，过期重新登录或重新游客会话 |
+| `POST /api/register` / `/api/login` / `/api/refresh` | 使用 **`/api/auth/sign-up/email`**、**`/api/auth/sign-in/username`**、**`/api/auth/sign-in/email-otp`**；**无 refresh 路径**，过期重新登录或重新游客会话 |
 | JWT + refreshToken 双令牌 | **会话令牌**；从响应头或 JSON 读取，Bearer 使用方式不变 |
 | 游客响应含 `refreshToken` | 游客仅返回 **`accessToken`**（及 `userId`、`credits` 等） |
 | 游客可 Bearer 升级注册 | 当前版本**不提供**该业务接口；正式账号请单独注册 |
-| 无 Turnstile | 注册 / 用户名登录 / 游客会话须配合 **Cloudflare Turnstile**（请求头 **`x-captcha-response`** 或游客 **`turnstile_token`**）；服务端 **`TURNSTILE_SECRET_KEY`** |
+| 无 Turnstile | 注册 / 用户名登录 / OTP 发送 / OTP 登录 / 游客会话须配合 **Cloudflare Turnstile**（请求头 **`x-captcha-response`** 或游客 **`turnstile_token`**）；服务端 **`TURNSTILE_SECRET_KEY`** |
 
 若你维护多环境，请同时确认**线上部署版本**与本文档一致（发布前的检查项由团队内部清单另行维护即可）。**切勿**在仓库或聊天中泄露 Turnstile **Secret Key**；若已泄露请在 Cloudflare 控制台**轮换密钥**。
 

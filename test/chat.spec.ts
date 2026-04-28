@@ -49,6 +49,22 @@ function authTokenFromResponse(res: Response, bodyText: string): string {
 	return j.token;
 }
 
+async function sendSignInOtp(email: string): Promise<Response> {
+	return SELF.fetch("https://example.com/api/auth/email-otp/send-verification-otp", {
+		method: "POST",
+		headers: jsonHeadersCaptcha(),
+		body: JSON.stringify({ email, type: "sign-in" }),
+	});
+}
+
+async function signInEmailOtp(email: string, otp: string): Promise<Response> {
+	return SELF.fetch("https://example.com/api/auth/sign-in/email-otp", {
+		method: "POST",
+		headers: jsonHeadersCaptcha(),
+		body: JSON.stringify({ email, otp }),
+	});
+}
+
 async function signUpUsername(
 	username: string,
 	password: string,
@@ -104,9 +120,11 @@ async function postChat(
 describe("chat/session/message integration", () => {
 	const origFetch = globalThis.fetch.bind(globalThis);
 	let sseDone = true;
+	const sentOtp = new Map<string, string>();
 
 	beforeEach(() => {
 		sseDone = true;
+		sentOtp.clear();
 		vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
 			const url =
 				typeof input === "string"
@@ -114,6 +132,21 @@ describe("chat/session/message integration", () => {
 					: input instanceof URL
 						? input.href
 						: input.url;
+			if (url === "https://api.resend.com/emails") {
+				const bodyText =
+					typeof init?.body === "string"
+						? init.body
+						: init?.body instanceof URLSearchParams
+							? init.body.toString()
+							: "";
+				const body = bodyText ? (JSON.parse(bodyText) as { to?: string[]; html?: string }) : {};
+				const to = body.to?.[0] ?? "";
+				const otp = body.html?.match(/>\s*([0-9]{6})\s*</)?.[1] ?? "";
+				if (to && otp) sentOtp.set(to, otp);
+				return Promise.resolve(
+					new Response(JSON.stringify({ id: "re_test_123" }), { status: 200 }),
+				);
+			}
 			if (url.includes("/ai/v1/chat/completions")) {
 				return Promise.resolve(
 					new Response(mockAiStream(sseDone), {
@@ -266,5 +299,50 @@ describe("chat/session/message integration", () => {
 		for (let i = 1; i < seqs.length; i += 1) {
 			expect(seqs[i]).toBeGreaterThan(seqs[i - 1]);
 		}
+	});
+
+	it("supports email OTP sign-in and returns session token", async () => {
+		const email = `${uniqueName("otp")}@example.com`;
+		const sendRes = await sendSignInOtp(email);
+		const sendText = await sendRes.text();
+		expect(sendRes.status).toBe(200);
+		expect(sendText.length).toBeGreaterThan(0);
+		const otp = sentOtp.get(email);
+		expect(otp).toBeTruthy();
+
+		const signInRes = await signInEmailOtp(email, otp!);
+		const signInText = await signInRes.text();
+		expect(signInRes.status).toBe(200);
+		expect(() => authTokenFromResponse(signInRes, signInText)).not.toThrow();
+	});
+
+	it("rejects sending OTP without captcha header", async () => {
+		const res = await SELF.fetch(
+			"https://example.com/api/auth/email-otp/send-verification-otp",
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ email: `${uniqueName("no_captcha")}@example.com`, type: "sign-in" }),
+			},
+		);
+		expect(res.status).toBe(400);
+	});
+
+	it("returns error for wrong OTP and blocks after too many attempts", async () => {
+		const email = `${uniqueName("otp_err")}@example.com`;
+		const sendRes = await sendSignInOtp(email);
+		expect(sendRes.status).toBe(200);
+		await sendRes.text();
+
+		let tooManyAttemptsHit = false;
+		for (let i = 0; i < 6; i += 1) {
+			const res = await signInEmailOtp(email, "000000");
+			const text = await res.text();
+			if (/TOO_MANY_ATTEMPTS/i.test(text)) {
+				tooManyAttemptsHit = true;
+				break;
+			}
+		}
+		expect(tooManyAttemptsHit).toBe(true);
 	});
 });
