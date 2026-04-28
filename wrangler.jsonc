@@ -24,6 +24,8 @@
 		"RESEND_FROM_EMAIL": "no-reply@luckyaitool.com",
 		// 可选：发件人展示名
 		"RESEND_FROM_NAME": "LLM Chat App",
+		// 可选：严格模式（true/1/on/yes）下发送失败将让 OTP 接口直接失败
+		"OTP_MAIL_STRICT_MODE": "false",
 		"TOOL_EMBED_MODEL": "@cf/baai/bge-base-en-v1.5",
 		"TOOL_RETRIEVAL_TOP_N": "2",
 		"TOOL_RETRIEVAL_TOP_K": "20",

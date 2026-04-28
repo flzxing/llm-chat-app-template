@@ -68,6 +68,11 @@ export interface Env {
 	RESEND_FROM_NAME?: string;
 
 	/**
+	 * 可选：OTP 邮件严格模式。开启后（true/1/on/yes）Resend 发送失败会直接让接口失败。
+	 */
+	OTP_MAIL_STRICT_MODE?: string;
+
+	/**
 	 * 可选：工具 embedding 模型 ID（默认 @cf/baai/bge-base-en-v1.5）。
 	 */
 	TOOL_EMBED_MODEL?: string;

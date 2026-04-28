@@ -16,6 +16,8 @@ RESEND_API_KEY=re_xxxxxxxxx
 RESEND_FROM_EMAIL=no-reply@example.com
 # 可选：发件显示名
 RESEND_FROM_NAME=LLM Chat App
+# 可选：严格模式（true/1/on/yes）下发送失败会直接返回错误，避免“接口成功但邮件没发出”
+OTP_MAIL_STRICT_MODE=false
 
 # ---- Vectorize 工具召回（可选覆盖 wrangler.jsonc 的默认值）----
 TOOL_EMBED_MODEL=@cf/baai/bge-base-en-v1.5

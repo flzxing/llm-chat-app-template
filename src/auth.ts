@@ -37,6 +37,11 @@ function otpHint(type: string): string {
 	return "Use this one-time code to continue resetting your password.";
 }
 
+function isTruthyEnv(value: string | undefined): boolean {
+	if (!value) return false;
+	return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
 function buildOtpMailHtml(params: {
 	otp: string;
 	type: string;
@@ -122,11 +127,30 @@ async function sendOtpWithResend(params: {
 	otp: string;
 	type: string;
 	expiresInSec: number;
-}) {
+}): Promise<boolean> {
 	const { env, email, otp, type, expiresInSec } = params;
 	const apiKey = env.RESEND_API_KEY || "";
 	const fromEmail = env.RESEND_FROM_EMAIL || "no-reply@example.com";
-	if (!apiKey || !env.RESEND_FROM_EMAIL) console.error("otp.mail.config.missing");
+	const maskedEmail = maskEmail(email);
+	const traceId = crypto.randomUUID();
+	console.log("otp.mail.send.start", {
+		traceId,
+		type,
+		email: maskedEmail,
+		hasApiKey: Boolean(apiKey),
+		hasFromEmail: Boolean(env.RESEND_FROM_EMAIL),
+		expiresInSec,
+	});
+	if (!apiKey || !env.RESEND_FROM_EMAIL) {
+		console.error("otp.mail.config.missing", {
+			traceId,
+			type,
+			email: maskedEmail,
+			hasApiKey: Boolean(apiKey),
+			hasFromEmail: Boolean(env.RESEND_FROM_EMAIL),
+			fallbackFromEmail: fromEmail,
+		});
+	}
 	const from = env.RESEND_FROM_NAME
 		? `${env.RESEND_FROM_NAME} <${fromEmail}>`
 		: fromEmail;
@@ -137,17 +161,42 @@ async function sendOtpWithResend(params: {
 		html: buildOtpMailHtml({ otp, type, email, expiresInSec }),
 		text: buildOtpMailText({ otp, type, expiresInSec }),
 	};
-	const res = await fetch("https://api.resend.com/emails", {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${apiKey}`,
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify(payload),
-	});
-	if (!res.ok) {
+	try {
+		const res = await fetch("https://api.resend.com/emails", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${apiKey}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(payload),
+		});
 		const body = await res.text();
-		console.error("otp.mail.send.failed", res.status, body.slice(0, 400));
+		if (!res.ok) {
+			console.error("otp.mail.send.failed", {
+				traceId,
+				type,
+				email: maskedEmail,
+				status: res.status,
+				body: body.slice(0, 400),
+			});
+			return false;
+		}
+		console.log("otp.mail.send.ok", {
+			traceId,
+			type,
+			email: maskedEmail,
+			status: res.status,
+			body: body.slice(0, 400),
+		});
+		return true;
+	} catch (error) {
+		console.error("otp.mail.send.exception", {
+			traceId,
+			type,
+			email: maskedEmail,
+			error: error instanceof Error ? error.message : String(error),
+		});
+		return false;
 	}
 }
 
@@ -182,7 +231,29 @@ export function createAuth(env: Env) {
 				allowedAttempts: 5,
 				resendStrategy: "reuse",
 				sendVerificationOTP: async ({ email, otp, type }) => {
-					// Fire-and-forget to reduce timing signal leakage.
+					const strictMode = isTruthyEnv(env.OTP_MAIL_STRICT_MODE);
+					console.log("otp.mail.enqueue", {
+						type,
+						email: maskEmail(email),
+						otpLength: otp.length,
+						strictMode,
+					});
+					if (strictMode) {
+						const ok = await sendOtpWithResend({
+							env,
+							email,
+							otp,
+							type,
+							expiresInSec: otpExpiresInSeconds,
+						});
+						if (!ok) {
+							throw new Error(
+								"OTP_EMAIL_DELIVERY_FAILED: resend send failed in strict mode",
+							);
+						}
+						return;
+					}
+					// Non-strict mode: keep anti-timing behavior with fire-and-forget.
 					void sendOtpWithResend({
 						env,
 						email,
