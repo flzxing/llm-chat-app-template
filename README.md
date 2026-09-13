@@ -143,7 +143,7 @@ npm wrangler tail
 └── README.md           # This documentation
 ```
 
-Lucky 主题货架与登录/聊天共用本 Worker。Android 客户端主题 Host 为 `https://luckyaitool.com`（路径仍是 `/v1/catalog`）。管理后台：`/theme-admin/`。push `main` 会走 GitHub Actions 部署（需仓库 secret `CLOUDFLARE_API_TOKEN`）。
+Lucky 主题货架与登录/聊天共用本 Worker。Android 客户端主题 Host 为 `https://luckyaitool.com`（路径仍是 `/v1/catalog`）。管理后台：`/theme-admin/`。Cloudflare Git 自动部署会跑 `npm run deploy`，其中会先 `npm --prefix theme-admin ci` 再构建后台。
 
 ## How It Works
 

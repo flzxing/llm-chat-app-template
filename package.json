@@ -32,7 +32,7 @@
 		"postinstall": "patch-package",
 		"cf-typegen": "wrangler types",
 		"check": "tsc --noEmit && wrangler deploy --dry-run",
-		"deploy": "npm run theme-admin:build && wrangler deploy",
+		"deploy": "npm --prefix theme-admin ci && npm --prefix theme-admin run build && wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"theme-admin:build": "npm --prefix theme-admin run build",
