@@ -101,6 +101,21 @@ export interface Env {
 	 * 手动初始化工具索引接口密钥。
 	 */
 	TOOL_INDEX_INIT_KEY?: string;
+
+	/**
+	 * Lucky 主题包 R2（catalog.json + packs/{id}/*）。
+	 */
+	THEMES: R2Bucket;
+
+	/**
+	 * 主题货架管理接口 Bearer。生产用 `wrangler secret put THEME_ADMIN_TOKEN`。
+	 */
+	THEME_ADMIN_TOKEN?: string;
+
+	/**
+	 * 兼容旧 lucky-themes Worker 的 admin token 名。
+	 */
+	ADMIN_TOKEN?: string;
 }
 
 /**

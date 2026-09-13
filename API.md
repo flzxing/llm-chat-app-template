@@ -1183,3 +1183,24 @@ curl -N --max-time 60 -X POST "$BASE/api/chat" \
 ```
 
 再做 Base64URL 编码（无 `=` 补位）。KMP 侧应把 `cursor` 当作不透明字符串回传，不做业务解释。
+
+---
+
+## 13. Lucky 主题 CDN（从 Android `tools/theme-cdn` 迁入）
+
+路径与旧 Worker `lucky-themes` 相同，客户端只改 Host。
+
+- `GET /v1/catalog?audience=standard|mature|all`
+- `GET /assets/packs/{id}/pack.zip`、`GET /assets/packs/{id}/*.webp`
+- `GET /v1/packs/{id}`
+- Admin（`Authorization: Bearer <THEME_ADMIN_TOKEN>`）：
+  - `GET /v1/admin/packs`
+  - `PUT /v1/admin/packs/{id}`
+  - `PUT /v1/admin/packs/{id}/zip`
+  - `PUT /v1/admin/packs/{id}/assets/{name}`
+  - `POST /v1/admin/catalog/rebuild`
+  - `DELETE /v1/admin/packs/{id}`（隐藏）
+  - `DELETE /v1/admin/packs/{id}?hard=1`
+- 管理后台静态页：`/theme-admin/`
+
+货架 R2 仍是 bucket `lucky-themes`。catalog 里旧的 `*.workers.dev` 资源 URL 会按当前请求 origin 重写。

@@ -1,0 +1,16 @@
+:root { color: #e8e4dc; background: #12161c; font-family: ui-sans-serif, system-ui, sans-serif; }
+body { margin: 0; }
+main { max-width: 960px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 22px; }
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+input, button { border-radius: 8px; border: 1px solid #3a414c; background: #1b2129; color: inherit; padding: 8px 10px; }
+button { cursor: pointer; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.card { background: #1b2129; border-radius: 12px; overflow: hidden; cursor: pointer; }
+.card img { width: 100%; aspect-ratio: 9/16; object-fit: cover; display: block; background: #0d1116; }
+.card p { margin: 0; padding: 8px 10px 12px; font-size: 13px; }
+.error { color: #ff8a80; }
+.shelf { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px; }
+.shelf th, .shelf td { border-bottom: 1px solid #2a313a; padding: 8px; text-align: left; vertical-align: middle; }
+.thumb { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; background: #0d1116; }
+.editor { background: #1b2129; border-radius: 12px; padding: 16px; margin-bottom: 24px; }

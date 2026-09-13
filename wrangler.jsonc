@@ -6,6 +6,7 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "llm-chat-app-template",
 	"main": "src/index.ts",
+	"workers_dev": true,
 	"compatibility_date": "2025-10-08",
 	"compatibility_flags": [
 		"nodejs_compat",
@@ -16,8 +17,15 @@
 		"directory": "./public"
 	},
 	// 生产部署用；本地 wrangler dev 以 .dev.vars 中的 BETTER_AUTH_URL 覆盖
+	"routes": [
+		{
+			"pattern": "luckyaitool.com",
+			"zone_name": "luckyaitool.com",
+			"custom_domain": true
+		}
+	],
 	"vars": {
-		"BETTER_AUTH_URL": "https://llm-chat-app-template.zhouxing87808911.workers.dev",
+		"BETTER_AUTH_URL": "https://luckyaitool.com",
 		// OpenAI 兼容 Workers AI：`https://api.cloudflare.com/client/v4/accounts/{id}/ai/v1/chat/completions`
 		"CLOUDFLARE_ACCOUNT_ID": "04261ff01cec2227fc3194c65e84a18a",
 		// OTP 邮件发件地址（Resend verified domain）；RESEND_API_KEY 请用 secret 注入
@@ -25,7 +33,7 @@
 		// 可选：发件人展示名
 		"RESEND_FROM_NAME": "LLM Chat App",
 		// 可选：严格模式（true/1/on/yes）下发送失败将让 OTP 接口直接失败
-		"OTP_MAIL_STRICT_MODE": "false",
+		"OTP_MAIL_STRICT_MODE": "true",
 		"TOOL_EMBED_MODEL": "@cf/baai/bge-base-en-v1.5",
 		"TOOL_RETRIEVAL_TOP_N": "2",
 		"TOOL_RETRIEVAL_TOP_K": "20",
@@ -51,6 +59,12 @@
 			"binding": "DB",
 			"database_name": "kmp-ai-db",
 			"database_id": "ef3619ac-5659-4447-b36d-119051dd38af"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "THEMES",
+			"bucket_name": "lucky-themes"
 		}
 	],
 	"observability": {

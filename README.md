@@ -130,15 +130,20 @@ npm wrangler tail
 /
 ├── public/             # Static assets
 │   ├── index.html      # Chat UI HTML
-│   └── chat.js         # Chat UI frontend script
+│   ├── chat.js         # Chat UI frontend script
+│   └── theme-admin/    # Lucky 主题货架管理后台（vite 构建产物）
+├── theme-admin/        # 主题管理后台源码
 ├── src/
 │   ├── index.ts        # Main Worker entry point
+│   ├── themes.ts       # Lucky 主题 CDN（/v1/catalog + R2）
 │   └── types.ts        # TypeScript type definitions
 ├── test/               # Test files
 ├── wrangler.jsonc      # Cloudflare Worker configuration
 ├── tsconfig.json       # TypeScript configuration
 └── README.md           # This documentation
 ```
+
+Lucky 主题货架与登录/聊天共用本 Worker。Android 客户端主题 Host 为 `https://luckyaitool.com`（路径仍是 `/v1/catalog`）。管理后台：`/theme-admin/`。push `main` 会走 GitHub Actions 部署（需仓库 secret `CLOUDFLARE_API_TOKEN`）。
 
 ## How It Works
 

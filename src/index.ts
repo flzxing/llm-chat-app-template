@@ -17,6 +17,7 @@ import {
 	handleListSessions,
 	handleUpdateSessionTitle,
 } from "./routes/sessions";
+import { handleThemeRequest } from "./themes";
 import { getToolIndexStatus, initializeToolIndex } from "./tool-router";
 import type { Env } from "./types";
 
@@ -45,6 +46,12 @@ app.use(
 	}),
 );
 app.use("*", secureHeaders());
+
+app.use("*", async (c, next) => {
+	const themed = await handleThemeRequest(c.req.raw, c.env);
+	if (themed) return themed;
+	return next();
+});
 
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
