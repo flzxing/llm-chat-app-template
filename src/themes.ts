@@ -108,11 +108,12 @@ export function filterCatalogPacks(packs: ThemePackRecord[] | undefined, audienc
 		.sort((a, b) => (a.sort! - b.sort!) || a.id.localeCompare(b.id));
 }
 
-export function catalogEtag(packs: ThemePackRecord[] | undefined) {
-	const token = (packs || [])
-		.map((pack) => `${pack.id}:${pack.version}:${pack.status || "published"}`)
-		.sort()
-		.join("|");
+export function catalogEtag(packs: ThemePackRecord[] | undefined, salt = "") {
+	const token =
+		(packs || [])
+			.map((pack) => `${pack.id}:${pack.version}:${pack.status || "published"}:${pack.packUrl || ""}:${pack.preview || ""}`)
+			.sort()
+			.join("|") + salt;
 	let hash = 0;
 	for (let i = 0; i < token.length; i += 1) {
 		hash = (hash * 31 + token.charCodeAt(i)) >>> 0;
@@ -327,6 +328,7 @@ export async function handleThemeRequest(request: Request, env: Env): Promise<Re
 				packUrl,
 			};
 		});
+		payload.etag = catalogEtag(payload.packs, url.origin);
 		const etag = payload.etag;
 		if (request.headers.get("if-none-match") === etag) {
 			return new Response(null, { status: 304, headers: { ...JSON_HEADERS, etag } });

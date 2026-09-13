@@ -42,6 +42,12 @@ describe("theme catalog", () => {
 		expect(a).not.toBe(b);
 	});
 
+	it("changes etag when public host changes", () => {
+		expect(catalogEtag(sample, "https://luckyaitool.com")).not.toBe(
+			catalogEtag(sample, "https://lucky-themes.zhouxing87808911.workers.dev"),
+		);
+	});
+
 	it("emits protocol v2", () => {
 		const payload = publicCatalog({ packs: sample }, "all");
 		expect(payload.schemaVersion).toBe(2);
