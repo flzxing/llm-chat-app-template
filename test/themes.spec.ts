@@ -6,6 +6,7 @@ import {
 	isPublished,
 	normalizePack,
 	publicCatalog,
+	rewritePackAssets,
 	rewriteThemeAssetUrl,
 } from "../src/themes";
 
@@ -62,6 +63,20 @@ describe("theme catalog", () => {
 			"https://luckyaitool.com/assets/packs/azur_lane_atago/pack.zip",
 		);
 	});
+
+	it("rewrites admin pack preview and zip onto the request origin", () => {
+		const pack = rewritePackAssets(
+			{
+				id: "chibi_maruko",
+				version: 2,
+				preview: "https://lucky-themes.zhouxing87808911.workers.dev/assets/packs/chibi_maruko/preview.webp",
+				packUrl: "https://lucky-themes.zhouxing87808911.workers.dev/assets/packs/chibi_maruko/pack.zip",
+			},
+			"https://luckyaitool.com",
+		);
+		expect(pack.preview).toBe("https://luckyaitool.com/assets/packs/chibi_maruko/preview.webp?v=2");
+		expect(pack.packUrl).toBe("https://luckyaitool.com/assets/packs/chibi_maruko/pack.zip?v=2");
+	});
 });
 
 describe("theme routes", () => {
@@ -85,14 +100,22 @@ describe("theme routes", () => {
 			"catalog.json",
 			JSON.stringify({
 				schemaVersion: 2,
-				packs: [{ id: "pack_x", displayName: "Probe", status: "published" }],
+				packs: [
+					{
+						id: "pack_x",
+						displayName: "Probe",
+						status: "published",
+						preview: "https://lucky-themes.zhouxing87808911.workers.dev/assets/packs/pack_x/preview.webp",
+					},
+				],
 			}),
 		);
 		const response = await SELF.fetch("https://example.com/v1/admin/packs", {
 			headers: { authorization: "Bearer theme-admin-test-token" },
 		});
 		expect(response.status).toBe(200);
-		const body = await response.json<{ packs: Array<{ id: string }> }>();
+		const body = await response.json<{ packs: Array<{ id: string; preview?: string }> }>();
 		expect(body.packs.map((p) => p.id)).toEqual(["pack_x"]);
+		expect(body.packs[0].preview).toBe("https://example.com/assets/packs/pack_x/preview.webp?v=1");
 	});
 });

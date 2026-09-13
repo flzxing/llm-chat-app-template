@@ -145,6 +145,27 @@ export function rewriteThemeAssetUrl(stored: string | null | undefined, origin: 
 	return stored;
 }
 
+function withCacheBust(url: string, version: number | undefined) {
+	if (!url || url.includes("?")) return url;
+	return `${url}?v=${version ?? 1}`;
+}
+
+/** Rewrite stored workers.dev / relative pack assets onto the request origin. */
+export function rewritePackAssets(pack: ThemePackRecord, origin: string): ThemePackRecord {
+	const n = normalizePack(pack);
+	const zip = rewriteThemeAssetUrl(n.packUrl, origin, `${origin}/assets/packs/${n.id}/pack.zip`);
+	const preview = rewriteThemeAssetUrl(n.preview, origin, `${origin}/assets/packs/${n.id}/preview.webp`);
+	const previewDark = n.previewDark
+		? rewriteThemeAssetUrl(n.previewDark, origin, `${origin}/assets/packs/${n.id}/preview-dark.webp`)
+		: null;
+	return {
+		...n,
+		preview: withCacheBust(preview, n.version),
+		previewDark: previewDark ? withCacheBust(previewDark, n.version) : null,
+		packUrl: withCacheBust(zip, n.version),
+	};
+}
+
 function adminOk(request: Request, env: Env) {
 	const token = env.THEME_ADMIN_TOKEN || env.ADMIN_TOKEN;
 	if (!token) return false;
@@ -199,13 +220,16 @@ async function handleAdmin(request: Request, env: Env, url: URL) {
 		const catalog = await loadCatalog(bucket);
 		return jsonThemeResponse({
 			schemaVersion: 2,
-			packs: (catalog.packs || []).map(normalizePack),
+			packs: (catalog.packs || []).map((pack) => rewritePackAssets(pack, url.origin)),
 		});
 	}
 
 	if (path === "/v1/admin/catalog/rebuild" && request.method === "POST") {
 		const catalog = await loadCatalog(bucket);
-		const rebuilt = { schemaVersion: 2, packs: (catalog.packs || []).map(normalizePack) };
+		const rebuilt = {
+			schemaVersion: 2,
+			packs: (catalog.packs || []).map((pack) => rewritePackAssets(pack, url.origin)),
+		};
 		await writeJson(bucket, "catalog.json", rebuilt);
 		logAdmin("rebuild", "*", rebuilt.packs.length);
 		return jsonThemeResponse({ ok: true, etag: catalogEtag(rebuilt.packs), count: rebuilt.packs.length });
@@ -222,7 +246,7 @@ async function handleAdmin(request: Request, env: Env, url: URL) {
 		});
 		const catalog = await loadCatalog(bucket);
 		const current = (catalog.packs || []).find((pack) => pack.id === id) || { id };
-		const next = normalizePack({
+		const next = rewritePackAssets({
 			...current,
 			id,
 			packUrl: `${url.origin}/assets/packs/${id}/pack.zip`,
@@ -230,7 +254,7 @@ async function handleAdmin(request: Request, env: Env, url: URL) {
 			sha256,
 			preview: current.preview || `${url.origin}/assets/packs/${id}/preview.webp`,
 			status: current.status || "published",
-		});
+		}, url.origin);
 		const packJson = (await readJson<ThemePackRecord>(bucket, `packs/${id}/pack.json`)) || { id };
 		await writeJson(bucket, `packs/${id}/pack.json`, { ...packJson, ...next });
 		await writeJson(bucket, "catalog.json", upsertCatalog(catalog, next));
@@ -257,7 +281,7 @@ async function handleAdmin(request: Request, env: Env, url: URL) {
 			const body = (await request.json()) as ThemePackRecord;
 			const catalog = await loadCatalog(bucket);
 			const current = (catalog.packs || []).find((pack) => pack.id === id) || { id };
-			const next = normalizePack({ ...current, ...body, id });
+			const next = rewritePackAssets({ ...current, ...body, id }, url.origin);
 			const packJson = (await readJson<ThemePackRecord>(bucket, `packs/${id}/pack.json`)) || { id };
 			await writeJson(bucket, `packs/${id}/pack.json`, { ...packJson, ...next });
 			await writeJson(bucket, "catalog.json", upsertCatalog(catalog, next));
@@ -277,7 +301,7 @@ async function handleAdmin(request: Request, env: Env, url: URL) {
 			}
 			const current = (catalog.packs || []).find((pack) => pack.id === id);
 			if (!current) return jsonThemeResponse({ error: "not_found" }, 404);
-			const next = normalizePack({ ...current, status: "hidden" });
+			const next = rewritePackAssets({ ...current, status: "hidden" }, url.origin);
 			await writeJson(bucket, "catalog.json", upsertCatalog(catalog, next));
 			logAdmin("hide", id, next.version);
 			return jsonThemeResponse({ ok: true, pack: next });
@@ -314,20 +338,7 @@ export async function handleThemeRequest(request: Request, env: Env): Promise<Re
 	if (path === "/v1/catalog") {
 		const catalog = await loadCatalog(env.THEMES);
 		const payload = publicCatalog(catalog, url.searchParams.get("audience"));
-		payload.packs = payload.packs.map((pack) => {
-			const fallbackZip = `${url.origin}/assets/packs/${pack.id}/pack.zip`;
-			const zip = rewriteThemeAssetUrl(pack.packUrl, url.origin, fallbackZip);
-			const packUrl = zip.includes("?") ? zip : `${zip}?v=${pack.version ?? 1}`;
-			return {
-				...pack,
-				preview: rewriteThemeAssetUrl(
-					pack.preview,
-					url.origin,
-					`${url.origin}/assets/packs/${pack.id}/preview.webp`,
-				),
-				packUrl,
-			};
-		});
+		payload.packs = payload.packs.map((pack) => rewritePackAssets(pack, url.origin));
 		payload.etag = catalogEtag(payload.packs, url.origin);
 		const etag = payload.etag;
 		if (request.headers.get("if-none-match") === etag) {

@@ -8,4 +8,16 @@ export default defineConfig({
     outDir: "../public/theme-admin",
     emptyOutDir: true,
   },
+  server: {
+    proxy: {
+      "/v1": "https://luckyaitool.com",
+      "/assets": "https://luckyaitool.com",
+    },
+  },
+  preview: {
+    proxy: {
+      "/v1": "https://luckyaitool.com",
+      "/assets": "https://luckyaitool.com",
+    },
+  },
 });
