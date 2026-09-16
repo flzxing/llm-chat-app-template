@@ -15,8 +15,7 @@ export function resolvePackAssetUrl(stored, origin, packId, fileName, version = 
   try {
     const url = new URL(stored, origin);
     if (url.pathname.startsWith("/assets/packs/")) {
-      const href = `${origin}${url.pathname}`;
-      return url.search ? `${href}${url.search}` : `${href}?v=${version ?? 1}`;
+      return `${origin}${url.pathname}?v=${version ?? 1}`;
     }
   } catch {
     return fallback || stored;
@@ -151,6 +150,7 @@ export function mapAdminError(error) {
   if (text === "unauthorized") return "口令无效或已过期，请重新登录。";
   if (text === "not_found") return "主题不存在。";
   if (text === "bad_key") return "资源路径不合法。";
+  if (text === "bad_zip") return "主题包不是有效 zip，请重新选择文件。";
   if (text === "timeout" || text.includes("AbortError")) return "网络超时，请重试。";
   return text || "操作失败";
 }

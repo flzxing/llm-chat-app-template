@@ -73,6 +73,18 @@ test("rewrites retired theme worker preview onto current origin", () => {
   assert.equal(url, "https://luckyaitool.com/assets/packs/chibi_maruko/preview.webp?v=2");
 });
 
+test("replaces stale asset query when pack version advances", () => {
+  const url = resolvePackPreview(
+    {
+      id: "lol_ahri",
+      version: 3,
+      preview: "https://luckyaitool.com/assets/packs/lol_ahri/preview.webp?v=2",
+    },
+    "https://luckyaitool.com",
+  );
+  assert.equal(url, "https://luckyaitool.com/assets/packs/lol_ahri/preview.webp?v=3");
+});
+
 test("filter search status audience and featured-first sort", () => {
   const found = filterAndSortPacks(shelf, { query: "小丸子", status: "published", audience: "standard" });
   assert.deepEqual(found.map((p) => p.id), ["chibi_maruko"]);

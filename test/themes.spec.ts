@@ -4,10 +4,13 @@ import {
 	catalogEtag,
 	filterCatalogPacks,
 	isPublished,
+	isZipArchive,
+	nextPackVersion,
 	normalizePack,
 	publicCatalog,
 	rewritePackAssets,
 	rewriteThemeAssetUrl,
+	withAssetCacheBust,
 } from "../src/themes";
 
 const sample = [
@@ -41,6 +44,26 @@ describe("theme catalog", () => {
 		const a = catalogEtag(sample);
 		const b = catalogEtag(sample.map((p) => (p.id === "ultraman_tiga" ? { ...p, status: "hidden" } : p)));
 		expect(a).not.toBe(b);
+	});
+
+	it("changes etag when zip sha or size changes without a version bump", () => {
+		const a = catalogEtag([{ id: "lol_ahri", version: 2, sha256: "aaa", packBytes: 10 }]);
+		const b = catalogEtag([{ id: "lol_ahri", version: 2, sha256: "bbb", packBytes: 11 }]);
+		expect(a).not.toBe(b);
+	});
+
+	it("bumps pack version only when the zip digest changes", () => {
+		expect(nextPackVersion({ id: "x" }, "aaa")).toBe(1);
+		expect(nextPackVersion({ id: "x", version: 2, sha256: "aaa" }, "aaa")).toBe(2);
+		expect(nextPackVersion({ id: "x", version: 2, sha256: "aaa" }, "bbb")).toBe(3);
+		expect(isZipArchive(new Uint8Array([0x50, 0x4b, ...new Uint8Array(20)]).buffer)).toBe(true);
+		expect(isZipArchive(new Uint8Array([0, 1, 2]).buffer)).toBe(false);
+	});
+
+	it("replaces stale cache-bust query when version advances", () => {
+		expect(withAssetCacheBust("https://luckyaitool.com/assets/packs/lol_ahri/pack.zip?v=2", 3)).toBe(
+			"https://luckyaitool.com/assets/packs/lol_ahri/pack.zip?v=3",
+		);
 	});
 
 	it("changes etag when public host changes", () => {
@@ -117,5 +140,33 @@ describe("theme routes", () => {
 		const body = await response.json<{ packs: Array<{ id: string; preview?: string }> }>();
 		expect(body.packs.map((p) => p.id)).toEqual(["pack_x"]);
 		expect(body.packs[0].preview).toBe("https://example.com/assets/packs/pack_x/preview.webp?v=1");
+	});
+
+	it("rejects a non-zip admin upload and bumps version when the digest changes", async () => {
+		await env.THEMES.put(
+			"catalog.json",
+			JSON.stringify({
+				schemaVersion: 2,
+				packs: [{ id: "lol_ahri", version: 2, sha256: "old", status: "published" }],
+			}),
+		);
+		const bad = await SELF.fetch("https://example.com/v1/admin/packs/lol_ahri/zip", {
+			method: "PUT",
+			headers: { authorization: "Bearer theme-admin-test-token" },
+			body: "not-a-zip",
+		});
+		expect(bad.status).toBe(400);
+		const zip = new Uint8Array(32);
+		zip[0] = 0x50;
+		zip[1] = 0x4b;
+		const ok = await SELF.fetch("https://example.com/v1/admin/packs/lol_ahri/zip", {
+			method: "PUT",
+			headers: { authorization: "Bearer theme-admin-test-token", "content-type": "application/zip" },
+			body: zip,
+		});
+		expect(ok.status).toBe(200);
+		const body = await ok.json<{ version: number; packUrl: string }>();
+		expect(body.version).toBe(3);
+		expect(body.packUrl).toContain("?v=3");
 	});
 });

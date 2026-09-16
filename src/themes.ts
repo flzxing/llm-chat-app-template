@@ -111,7 +111,21 @@ export function filterCatalogPacks(packs: ThemePackRecord[] | undefined, audienc
 export function catalogEtag(packs: ThemePackRecord[] | undefined, salt = "") {
 	const token =
 		(packs || [])
-			.map((pack) => `${pack.id}:${pack.version}:${pack.status || "published"}:${pack.packUrl || ""}:${pack.preview || ""}`)
+			.map((pack) =>
+				[
+					pack.id,
+					pack.version ?? 1,
+					pack.status || "published",
+					pack.audience || "standard",
+					pack.displayName || "",
+					pack.sort ?? 0,
+					pack.featured ? "1" : "0",
+					pack.packUrl || "",
+					pack.preview || "",
+					pack.packBytes ?? "",
+					pack.sha256 || "",
+				].join(":"),
+			)
 			.sort()
 			.join("|") + salt;
 	let hash = 0;
@@ -119,6 +133,19 @@ export function catalogEtag(packs: ThemePackRecord[] | undefined, salt = "") {
 		hash = (hash * 31 + token.charCodeAt(i)) >>> 0;
 	}
 	return `w/${(packs || []).length}-${hash.toString(16)}`;
+}
+
+/** Keep version stable on first zip / identical sha; bump when the object bytes change. */
+export function nextPackVersion(current: ThemePackRecord | undefined, sha256: string) {
+	const version = current?.version ?? 1;
+	if (current?.sha256 && current.sha256 !== sha256) return version + 1;
+	return version;
+}
+
+export function isZipArchive(bytes: ArrayBuffer) {
+	if (bytes.byteLength < 22) return false;
+	const header = new Uint8Array(bytes, 0, 2);
+	return header[0] === 0x50 && header[1] === 0x4b;
 }
 
 export function publicCatalog(catalog: ThemeCatalogRecord | null | undefined, audience: string | null) {
@@ -145,9 +172,15 @@ export function rewriteThemeAssetUrl(stored: string | null | undefined, origin: 
 	return stored;
 }
 
-function withCacheBust(url: string, version: number | undefined) {
-	if (!url || url.includes("?")) return url;
-	return `${url}?v=${version ?? 1}`;
+export function withAssetCacheBust(url: string, version: number | undefined) {
+	if (!url) return url;
+	try {
+		const parsed = new URL(url);
+		parsed.searchParams.set("v", String(version ?? 1));
+		return parsed.toString();
+	} catch {
+		return `${url.split("?")[0]}?v=${version ?? 1}`;
+	}
 }
 
 /** Rewrite stored workers.dev / relative pack assets onto the request origin. */
@@ -160,9 +193,9 @@ export function rewritePackAssets(pack: ThemePackRecord, origin: string): ThemeP
 		: null;
 	return {
 		...n,
-		preview: withCacheBust(preview, n.version),
-		previewDark: previewDark ? withCacheBust(previewDark, n.version) : null,
-		packUrl: withCacheBust(zip, n.version),
+		preview: withAssetCacheBust(preview, n.version),
+		previewDark: previewDark ? withAssetCacheBust(previewDark, n.version) : null,
+		packUrl: withAssetCacheBust(zip, n.version),
 	};
 }
 
@@ -239,6 +272,7 @@ async function handleAdmin(request: Request, env: Env, url: URL) {
 	if (zipMatch && request.method === "PUT") {
 		const id = decodeURIComponent(zipMatch[1]);
 		const bytes = await request.arrayBuffer();
+		if (!isZipArchive(bytes)) return jsonThemeResponse({ error: "bad_zip" }, 400);
 		const digest = await crypto.subtle.digest("SHA-256", bytes);
 		const sha256 = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 		await bucket.put(`packs/${id}/pack.zip`, bytes, {
@@ -249,6 +283,7 @@ async function handleAdmin(request: Request, env: Env, url: URL) {
 		const next = rewritePackAssets({
 			...current,
 			id,
+			version: nextPackVersion(current, sha256),
 			packUrl: `${url.origin}/assets/packs/${id}/pack.zip`,
 			packBytes: bytes.byteLength,
 			sha256,
@@ -259,7 +294,14 @@ async function handleAdmin(request: Request, env: Env, url: URL) {
 		await writeJson(bucket, `packs/${id}/pack.json`, { ...packJson, ...next });
 		await writeJson(bucket, "catalog.json", upsertCatalog(catalog, next));
 		logAdmin("zip", id, next.version);
-		return jsonThemeResponse({ ok: true, id, sha256, packBytes: next.packBytes, packUrl: next.packUrl });
+		return jsonThemeResponse({
+			ok: true,
+			id,
+			sha256,
+			packBytes: next.packBytes,
+			packUrl: next.packUrl,
+			version: next.version,
+		});
 	}
 
 	const assetMatch = path.match(/^\/v1\/admin\/packs\/([^/]+)\/assets\/(.+)$/);
@@ -270,6 +312,29 @@ async function handleAdmin(request: Request, env: Env, url: URL) {
 		const contentType = request.headers.get("content-type") || "application/octet-stream";
 		const key = `packs/${id}/${name}`;
 		await bucket.put(key, request.body, { httpMetadata: { contentType } });
+		const isPreview = name === "preview.webp" || name === "preview-dark.webp";
+		if (isPreview) {
+			const catalog = await loadCatalog(bucket);
+			const current = (catalog.packs || []).find((pack) => pack.id === id) || { id };
+			const next = rewritePackAssets({
+				...current,
+				id,
+				version: (current.version ?? 1) + 1,
+				preview:
+					name === "preview.webp"
+						? `${url.origin}/assets/packs/${id}/preview.webp`
+						: current.preview,
+				previewDark:
+					name === "preview-dark.webp"
+						? `${url.origin}/assets/packs/${id}/preview-dark.webp`
+						: current.previewDark,
+			}, url.origin);
+			const packJson = (await readJson<ThemePackRecord>(bucket, `packs/${id}/pack.json`)) || { id };
+			await writeJson(bucket, `packs/${id}/pack.json`, { ...packJson, ...next });
+			await writeJson(bucket, "catalog.json", upsertCatalog(catalog, next));
+			logAdmin("asset", id, next.version);
+			return jsonThemeResponse({ ok: true, key, url: `/assets/${key}`, version: next.version });
+		}
 		logAdmin("asset", id, name);
 		return jsonThemeResponse({ ok: true, key, url: `/assets/${key}` });
 	}
