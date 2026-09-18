@@ -17,7 +17,7 @@ import {
   shouldSendHardDelete,
   upsertPack,
   validatePackId,
-} from "./ops.js";
+} from "./themeOps.js";
 
 const shelf = [
   { id: "ultraman_tiga", status: "published", audience: "standard", displayName: "Tiga", sort: 10 },

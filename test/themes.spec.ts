@@ -1,7 +1,10 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { legacyThemeAdminLocation, shouldServeOpsSpa } from "../src/http";
 import {
 	catalogEtag,
+	inferThemeIpTags,
+	mergeThemeIpTags,
 	filterCatalogPacks,
 	isPublished,
 	isZipArchive,
@@ -44,6 +47,20 @@ describe("theme catalog", () => {
 		const a = catalogEtag(sample);
 		const b = catalogEtag(sample.map((p) => (p.id === "ultraman_tiga" ? { ...p, status: "hidden" } : p)));
 		expect(a).not.toBe(b);
+	});
+
+	it("changes etag when tags change", () => {
+		const a = catalogEtag([{ id: "genshin_eula", tags: [] }]);
+		const b = catalogEtag([{ id: "genshin_eula", tags: ["genshin"] }]);
+		expect(a).not.toBe(b);
+	});
+
+	it("infers curated IP tags from pack ids and merges without dropping extras", () => {
+		expect(inferThemeIpTags("honor_daji")).toEqual(["honor_of_kings"]);
+		expect(inferThemeIpTags("hsr_firefly")).toEqual(["honkai_star_rail"]);
+		expect(inferThemeIpTags("honkai_seele")).toEqual(["honkai_impact"]);
+		expect(inferThemeIpTags("atelier_go_liyue")).toEqual([]);
+		expect(mergeThemeIpTags("genshin_eula", ["liyue", "eula"])).toEqual(["liyue", "eula", "genshin"]);
 	});
 
 	it("changes etag when zip sha or size changes without a version bump", () => {
@@ -168,5 +185,154 @@ describe("theme routes", () => {
 		const body = await ok.json<{ version: number; packUrl: string }>();
 		expect(body.version).toBe(3);
 		expect(body.packUrl).toContain("?v=3");
+	});
+
+	it("upserts metadata, hides from the public catalog, then restores it", async () => {
+		await env.THEMES.put(
+			"catalog.json",
+			JSON.stringify({
+				schemaVersion: 2,
+				packs: [{ id: "probe", displayName: "Probe", status: "published", audience: "standard" }],
+			}),
+		);
+		const hidden = await SELF.fetch("https://example.com/v1/admin/packs/probe", {
+			method: "PUT",
+			headers: {
+				authorization: "Bearer theme-admin-test-token",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ displayName: "Renamed", status: "hidden", featured: true }),
+		});
+		expect(hidden.status).toBe(200);
+		const catalog = await SELF.fetch("https://example.com/v1/catalog?audience=standard");
+		const publicBody = await catalog.json<{ packs: Array<{ id: string }> }>();
+		expect(publicBody.packs.find((pack) => pack.id === "probe")).toBeUndefined();
+
+		const listed = await SELF.fetch("https://example.com/v1/admin/packs", {
+			headers: { authorization: "Bearer theme-admin-test-token" },
+		});
+		const adminBody = await listed.json<{ packs: Array<{ displayName?: string; featured?: boolean; status?: string }> }>();
+		expect(adminBody.packs[0].displayName).toBe("Renamed");
+		expect(adminBody.packs[0].featured).toBe(true);
+		expect(adminBody.packs[0].status).toBe("hidden");
+
+		const shown = await SELF.fetch("https://example.com/v1/admin/packs/probe", {
+			method: "PUT",
+			headers: {
+				authorization: "Bearer theme-admin-test-token",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ status: "published" }),
+		});
+		expect(shown.status).toBe(200);
+		const again = await SELF.fetch("https://example.com/v1/catalog?audience=standard");
+		const restored = await again.json<{ packs: Array<{ id: string }> }>();
+		expect(restored.packs.some((pack) => pack.id === "probe")).toBe(true);
+	});
+
+	it("soft-hides with DELETE so the public catalog drops the pack", async () => {
+		await env.THEMES.put(
+			"catalog.json",
+			JSON.stringify({
+				schemaVersion: 2,
+				packs: [{ id: "gone", displayName: "Gone", status: "published", audience: "standard" }],
+			}),
+		);
+		const hide = await SELF.fetch("https://example.com/v1/admin/packs/gone", {
+			method: "DELETE",
+			headers: { authorization: "Bearer theme-admin-test-token" },
+		});
+		expect(hide.status).toBe(200);
+		const hiddenCatalog = await SELF.fetch("https://example.com/v1/catalog");
+		const hiddenBody = await hiddenCatalog.json<{ packs: Array<{ id: string }> }>();
+		expect(hiddenBody.packs.find((pack) => pack.id === "gone")).toBeUndefined();
+		const listed = await SELF.fetch("https://example.com/v1/admin/packs", {
+			headers: { authorization: "Bearer theme-admin-test-token" },
+		});
+		const adminBody = await listed.json<{ packs: Array<{ id: string; status?: string }> }>();
+		expect(adminBody.packs.find((pack) => pack.id === "gone")?.status).toBe("hidden");
+	});
+
+	it("hard delete removes the pack from catalog.json", async () => {
+		await env.THEMES.put(
+			"catalog.json",
+			JSON.stringify({
+				schemaVersion: 2,
+				packs: [{ id: "gone", displayName: "Gone", status: "hidden", audience: "standard" }],
+			}),
+		);
+		const hard = await SELF.fetch("https://example.com/v1/admin/packs/gone?hard=1", {
+			method: "DELETE",
+			headers: { authorization: "Bearer theme-admin-test-token" },
+		});
+		expect(hard.status).toBe(200);
+		const body = await hard.json<{ ok?: boolean; id?: string }>();
+		expect(body.ok).toBe(true);
+		expect(body.id).toBe("gone");
+		const catalogObject = await env.THEMES.get("catalog.json");
+		const catalog = JSON.parse((await catalogObject!.text()) as string) as { packs: Array<{ id: string }> };
+		expect(catalog.packs.find((pack) => pack.id === "gone")).toBeUndefined();
+	});
+
+	it("rebuilds catalog origins and rejects traversal plus anonymous writes", async () => {
+		await env.THEMES.put(
+			"catalog.json",
+			JSON.stringify({
+				schemaVersion: 2,
+				packs: [
+					{
+						id: "lol_ahri",
+						version: 2,
+						status: "published",
+						preview: "https://lucky-themes.zhouxing87808911.workers.dev/assets/packs/lol_ahri/preview.webp",
+						packUrl: "https://lucky-themes.zhouxing87808911.workers.dev/assets/packs/lol_ahri/pack.zip",
+					},
+				],
+			}),
+		);
+		const rebuild = await SELF.fetch("https://example.com/v1/admin/catalog/rebuild", {
+			method: "POST",
+			headers: { authorization: "Bearer theme-admin-test-token" },
+		});
+		expect(rebuild.status).toBe(200);
+		const rebuilt = JSON.parse(await (await env.THEMES.get("catalog.json"))!.text()) as {
+			packs: Array<{ preview?: string; packUrl?: string }>;
+		};
+		expect(rebuilt.packs[0].preview).toContain("https://example.com/assets/packs/lol_ahri/preview.webp");
+		expect(rebuilt.packs[0].packUrl).toContain("https://example.com/assets/packs/lol_ahri/pack.zip");
+
+		const escape = await SELF.fetch("https://example.com/v1/admin/packs/lol_ahri/assets/bad..key.webp", {
+			method: "PUT",
+			headers: { authorization: "Bearer theme-admin-test-token", "content-type": "text/plain" },
+			body: "nope",
+		});
+		expect(escape.status).toBe(400);
+
+		for (const init of [
+			{ path: "/v1/admin/packs/x", method: "PUT" },
+			{ path: "/v1/admin/packs/x", method: "DELETE" },
+			{ path: "/v1/admin/catalog/rebuild", method: "POST" },
+		]) {
+			const response = await SELF.fetch(`https://example.com${init.path}`, { method: init.method });
+			expect(response.status).toBe(401);
+		}
+	});
+
+	it("redirects the retired theme-admin path onto /ops/", async () => {
+		const response = await SELF.fetch("https://example.com/theme-admin/", { redirect: "manual" });
+		expect(response.status).toBe(301);
+		expect(new URL(response.headers.get("location") || "", "https://example.com").pathname).toBe("/ops/");
+	});
+});
+
+describe("ops console routing", () => {
+	it("rewrites legacy theme-admin URLs and only SPA-falls-back extensionless /ops paths", () => {
+		expect(legacyThemeAdminLocation(new URL("https://luckyaitool.com/theme-admin"))).toBe("/ops/");
+		expect(legacyThemeAdminLocation(new URL("https://luckyaitool.com/theme-admin/themes"))).toBe("/ops/themes");
+		expect(legacyThemeAdminLocation(new URL("https://luckyaitool.com/ops/"))).toBeNull();
+		expect(shouldServeOpsSpa("/ops")).toBe(true);
+		expect(shouldServeOpsSpa("/ops/themes")).toBe(true);
+		expect(shouldServeOpsSpa("/ops/assets/index.js")).toBe(false);
+		expect(shouldServeOpsSpa("/chat.js")).toBe(false);
 	});
 });

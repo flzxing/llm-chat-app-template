@@ -131,8 +131,8 @@ npm wrangler tail
 ├── public/             # Static assets
 │   ├── index.html      # Chat UI HTML
 │   ├── chat.js         # Chat UI frontend script
-│   └── theme-admin/    # Lucky 主题货架管理后台（vite 构建产物）
-├── theme-admin/        # 主题管理后台源码
+│   └── ops/            # LuckyAgent 一站式运营平台（vite 构建产物）
+├── ops/                # 运营平台源码（登录 / 首页 / 主题管理）
 ├── src/
 │   ├── index.ts        # Main Worker entry point
 │   ├── themes.ts       # Lucky 主题 CDN（/v1/catalog + R2）
@@ -143,7 +143,7 @@ npm wrangler tail
 └── README.md           # This documentation
 ```
 
-Lucky 主题货架与登录/聊天共用本 Worker。Android 客户端主题 Host 为 `https://luckyaitool.com`（路径仍是 `/v1/catalog`）。管理后台：`/theme-admin/`。Cloudflare Git 自动部署会跑 `npm run deploy`，其中会先 `npm --prefix theme-admin ci` 再构建后台。
+Lucky 主题货架与登录/聊天共用本 Worker。Android 客户端主题 Host 为 `https://luckyaitool.com`（路径仍是 `/v1/catalog`）。运营平台：`/ops/`（旧 `/theme-admin/` 会 301 过去）。Cloudflare Git 自动部署会跑 `npm run deploy`，其中会先构建 `ops`。
 
 ## How It Works
 

@@ -17,6 +17,7 @@ import {
 	handleListSessions,
 	handleUpdateSessionTitle,
 } from "./routes/sessions";
+import { legacyThemeAdminLocation, shouldServeOpsSpa } from "./http";
 import { handleThemeRequest } from "./themes";
 import { getToolIndexStatus, initializeToolIndex } from "./tool-router";
 import type { Env } from "./types";
@@ -144,6 +145,14 @@ app.all("/api/messages/:id", async (c) => {
 
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
-app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
+app.all("*", async (c) => {
+	const url = new URL(c.req.url);
+	const legacy = legacyThemeAdminLocation(url);
+	if (legacy) return c.redirect(legacy, 301);
+	if (shouldServeOpsSpa(url.pathname)) {
+		return c.env.ASSETS.fetch(new Request(new URL("/ops/index.html", url.origin), c.req.raw));
+	}
+	return c.env.ASSETS.fetch(c.req.raw);
+});
 
 export default app;

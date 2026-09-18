@@ -192,8 +192,11 @@ dist
 # End of https://www.toptal.com/developers/gitignore/api/macos,node,git
 
 public/theme-admin/
+public/ops/
 theme-admin/test-results/
 theme-admin/playwright-report/
+ops/test-results/
+ops/playwright-report/
 theme-admin/blob-report/
 
 ### Wrangler ###

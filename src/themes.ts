@@ -65,6 +65,38 @@ export function jsonThemeResponse(data: unknown, status = 200, extraHeaders: Rec
 	});
 }
 
+/** Curated IP slugs. Prefix order is significant (`hsr_` before `honkai_`). */
+export const THEME_IP_PREFIXES: Array<[string, string]> = [
+	["honor_", "honor_of_kings"],
+	["lol_", "league_of_legends"],
+	["genshin_", "genshin"],
+	["hsr_", "honkai_star_rail"],
+	["honkai_", "honkai_impact"],
+	["azur_", "azur_lane"],
+	["blue_", "blue_archive"],
+	["nikke_", "nikke"],
+	["arknights_", "arknights"],
+	["gfl_", "girls_frontline"],
+	["love_", "love_live"],
+	["fgo_", "fate_grand_order"],
+	["wuwa_", "wuthering_waves"],
+];
+
+export function inferThemeIpTags(id: string): string[] {
+	const raw = (id || "").toLowerCase();
+	if (!raw) return [];
+	for (const [prefix, slug] of THEME_IP_PREFIXES) {
+		if (raw === slug || raw.startsWith(prefix) || raw.startsWith(`${slug}_`)) return [slug];
+	}
+	return [];
+}
+
+export function mergeThemeIpTags(id: string, tags?: string[]): string[] {
+	const merged = new Set((tags || []).map((tag) => tag.trim()).filter(Boolean));
+	for (const slug of inferThemeIpTags(id)) merged.add(slug);
+	return [...merged];
+}
+
 export function normalizePack(pack: ThemePackRecord = { id: "" }): ThemePackRecord {
 	const status = pack.status || "published";
 	return {
@@ -124,6 +156,7 @@ export function catalogEtag(packs: ThemePackRecord[] | undefined, salt = "") {
 					pack.preview || "",
 					pack.packBytes ?? "",
 					pack.sha256 || "",
+					(pack.tags || []).slice().sort().join(","),
 				].join(":"),
 			)
 			.sort()
@@ -254,6 +287,26 @@ async function handleAdmin(request: Request, env: Env, url: URL) {
 		return jsonThemeResponse({
 			schemaVersion: 2,
 			packs: (catalog.packs || []).map((pack) => rewritePackAssets(pack, url.origin)),
+		});
+	}
+
+	if (path === "/v1/admin/catalog/backfill-ip-tags" && request.method === "POST") {
+		const catalog = await loadCatalog(bucket);
+		let changed = 0;
+		const packs = (catalog.packs || []).map((pack) => {
+			const tags = mergeThemeIpTags(pack.id, pack.tags);
+			const before = (pack.tags || []).slice().sort().join("\0");
+			const after = tags.slice().sort().join("\0");
+			if (before !== after) changed += 1;
+			return { ...pack, tags };
+		});
+		await writeJson(bucket, "catalog.json", { schemaVersion: 2, packs });
+		logAdmin("backfill_ip_tags", "*", `${changed}/${packs.length}`);
+		return jsonThemeResponse({
+			ok: true,
+			changed,
+			count: packs.length,
+			etag: catalogEtag(packs),
 		});
 	}
 

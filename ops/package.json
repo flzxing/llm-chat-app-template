@@ -1,14 +1,16 @@
 {
-  "name": "lucky-theme-admin",
+  "name": "luckyagent-ops",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test src/ops.test.js",
-    "test:e2e": "playwright test"
+    "test": "node --test src/themeOps.test.js src/modules.test.js",
+    "test:e2e": "playwright test",
+    "test:e2e:live": "OPS_LIVE=1 playwright test e2e/live"
   },
   "dependencies": {
+    "motion": "^12.23.12",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

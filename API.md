@@ -1201,6 +1201,6 @@ curl -N --max-time 60 -X POST "$BASE/api/chat" \
   - `POST /v1/admin/catalog/rebuild`
   - `DELETE /v1/admin/packs/{id}`（隐藏）
   - `DELETE /v1/admin/packs/{id}?hard=1`
-- 管理后台静态页：`/theme-admin/`
+- 运营平台静态页：`/ops/`（旧 `/theme-admin/` 301 到 `/ops/`）
 
 货架 R2 仍是 bucket `lucky-themes`。catalog 里旧的 `*.workers.dev` 资源 URL 会按当前请求 origin 重写。

@@ -3,9 +3,9 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  base: "/theme-admin/",
+  base: "/ops/",
   build: {
-    outDir: "../public/theme-admin",
+    outDir: "../public/ops",
     emptyOutDir: true,
   },
   server: {

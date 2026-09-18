@@ -1,4 +1,4 @@
-import { Component, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   draftToBody,
   fetchAdminPacks,
@@ -17,9 +17,7 @@ import {
   uploadZip,
   upsertPack,
   validatePackId,
-} from "./ops.js";
-
-const TOKEN_KEY = "lucky-theme-admin-token";
+} from "./themeOps.js";
 
 function Cover({ pack, className }) {
   const [failed, setFailed] = useState(false);
@@ -47,29 +45,6 @@ function Cover({ pack, className }) {
   );
 }
 
-export class ErrorBoundary extends Component {
-  constructor(props) {
-    super(props);
-    this.state = { error: null };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { error };
-  }
-
-  render() {
-    if (this.state.error) {
-      return (
-        <div className="boot">
-          <p className="error">运营台渲染失败：{this.state.error.message}</p>
-          <button type="button" onClick={() => window.location.reload()}>刷新</button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 function ToastStack({ toasts, onDismiss }) {
   return (
     <div className="toasts" aria-live="polite">
@@ -82,11 +57,7 @@ function ToastStack({ toasts, onDismiss }) {
   );
 }
 
-export function App() {
-  const [token, setToken] = useState(() => sessionStorage.getItem(TOKEN_KEY) ?? "");
-  const [authed, setAuthed] = useState(false);
-  const [loginValue, setLoginValue] = useState("");
-  const [loginError, setLoginError] = useState("");
+export function ThemeConsole({ token, onUnauthorized }) {
   const [packs, setPacks] = useState([]);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -98,7 +69,6 @@ export function App() {
   const [zipFile, setZipFile] = useState(null);
   const [previewFile, setPreviewFile] = useState(null);
   const [busy, setBusy] = useState("");
-  const [bootstrapping, setBootstrapping] = useState(Boolean(sessionStorage.getItem(TOKEN_KEY)));
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [rebuildOpen, setRebuildOpen] = useState(false);
@@ -121,39 +91,21 @@ export function App() {
     }, 4200);
   }
 
-  function persistSession(value) {
-    setToken(value);
-    sessionStorage.setItem(TOKEN_KEY, value);
-  }
-
-  function logout() {
-    sessionStorage.removeItem(TOKEN_KEY);
-    setToken("");
-    setAuthed(false);
-    setPacks([]);
-    setSelectedId("");
-    setCreating(false);
-    setLoginValue("");
-  }
-
   async function loadShelf(nextToken = token) {
     const data = await fetchAdminPacks(nextToken);
     const list = data.packs ?? [];
     setPacks(list);
-    setAuthed(true);
     return list;
   }
 
   async function run(label, work) {
     setBusy(label);
     try {
-      const result = await work();
-      return result;
+      return await work();
     } catch (cause) {
       const message = mapAdminError(cause);
       if (cause?.message === "unauthorized") {
-        logout();
-        setLoginError(message);
+        onUnauthorized(message);
       } else {
         toast(message, "err");
       }
@@ -164,49 +116,18 @@ export function App() {
   }
 
   useEffect(() => {
-    if (!token) {
-      setBootstrapping(false);
-      return;
-    }
     let cancelled = false;
     (async () => {
       try {
         await loadShelf(token);
       } catch (cause) {
-        if (!cancelled) {
-          logout();
-          setLoginError(mapAdminError(cause));
-        }
-      } finally {
-        if (!cancelled) setBootstrapping(false);
+        if (!cancelled) onUnauthorized(mapAdminError(cause));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  async function submitLogin(event) {
-    event.preventDefault();
-    setLoginError("");
-    const next = loginValue.trim();
-    if (!next) {
-      setLoginError("请输入运营口令。");
-      return;
-    }
-    setBusy("login");
-    try {
-      persistSession(next);
-      await loadShelf(next);
-      toast("已进入运营台");
-    } catch (cause) {
-      sessionStorage.removeItem(TOKEN_KEY);
-      setToken("");
-      setLoginError(mapAdminError(cause));
-    } finally {
-      setBusy("");
-    }
-  }
+  }, [token]);
 
   function askLeaveEditor() {
     if (!dirty) return true;
@@ -332,41 +253,6 @@ export function App() {
     };
   }, [localPreviewUrl]);
 
-  if (bootstrapping) {
-    return (
-      <div className="boot">
-        <p>正在核验会话…</p>
-      </div>
-    );
-  }
-
-  if (!authed) {
-    return (
-      <div className="login-shell">
-        <form className="login-card" onSubmit={submitLogin}>
-          <p className="eyebrow">Lucky Theme</p>
-          <h1>主题运营台</h1>
-          <p className="muted">上架、下架、换封面与发布目录。口令只存在本页会话，关闭标签页即失效。</p>
-          <label>
-            运营口令
-            <input
-              type="password"
-              autoComplete="current-password"
-              data-testid="login-token"
-              value={loginValue}
-              onChange={(event) => setLoginValue(event.target.value)}
-              placeholder="输入 THEME_ADMIN_TOKEN"
-            />
-          </label>
-          {loginError ? <p className="error" data-testid="login-error">{loginError}</p> : null}
-          <button type="submit" data-testid="login-submit" disabled={busy === "login"}>
-            {busy === "login" ? "验证中…" : "进入"}
-          </button>
-        </form>
-      </div>
-    );
-  }
-
   const previewPack = creating
     ? { id: draft.id, displayName: draft.displayName, version: 1, preview: localPreviewUrl || undefined }
     : selected
@@ -378,8 +264,8 @@ export function App() {
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
       <header className="topbar" data-testid="console">
         <div>
-          <p className="eyebrow">Lucky Theme</p>
-          <h1>运营台</h1>
+          <p className="eyebrow">Themes</p>
+          <h1>主题货架</h1>
         </div>
         <dl className="stats">
           <div>
@@ -406,9 +292,6 @@ export function App() {
         <div className="top-actions">
           <button type="button" className="ghost" onClick={() => setRebuildOpen(true)} disabled={Boolean(busy)}>
             重建目录
-          </button>
-          <button type="button" className="ghost" data-testid="logout" onClick={logout}>
-            退出
           </button>
         </div>
       </header>
@@ -443,7 +326,9 @@ export function App() {
               新建主题
             </button>
           </div>
-          <p className="count" data-testid="shelf-count">{visible.length} / {stats.total}</p>
+          <p className="count" data-testid="shelf-count">
+            {visible.length} / {stats.total}
+          </p>
           <ul className="pack-list" data-testid="pack-list">
             {visible.length === 0 ? (
               <li className="empty">没有匹配的主题。</li>
@@ -614,7 +499,10 @@ export function App() {
               </div>
 
               <footer className="editor-foot">
-                <p className="muted">{dirty ? "有未保存的更改" : "已与货架同步"}{busy ? ` · ${busy}…` : ""}</p>
+                <p className="muted">
+                  {dirty ? "有未保存的更改" : "已与货架同步"}
+                  {busy ? ` · ${busy}…` : ""}
+                </p>
                 <button type="button" className="primary" onClick={saveDraft} disabled={Boolean(busy)}>
                   {busy === "save" ? "保存中…" : "保存并发布目录"}
                 </button>
@@ -634,7 +522,9 @@ export function App() {
               <input value={deleteConfirm} onChange={(event) => setDeleteConfirm(event.target.value)} />
             </label>
             <div className="row end">
-              <button type="button" onClick={() => setDeleteOpen(false)}>取消</button>
+              <button type="button" onClick={() => setDeleteOpen(false)}>
+                取消
+              </button>
               <button type="button" className="danger" onClick={confirmHardDelete} disabled={Boolean(busy)}>
                 确认删除
               </button>
@@ -649,7 +539,9 @@ export function App() {
             <h3 id="rebuild-title">重建公开目录</h3>
             <p>按当前运营目录重写 catalog，并纠正旧域名资源地址。客户端会在下次刷新时拿到新 etag。</p>
             <div className="row end">
-              <button type="button" onClick={() => setRebuildOpen(false)}>取消</button>
+              <button type="button" onClick={() => setRebuildOpen(false)}>
+                取消
+              </button>
               <button type="button" className="primary" onClick={confirmRebuild} disabled={Boolean(busy)}>
                 重建
               </button>
