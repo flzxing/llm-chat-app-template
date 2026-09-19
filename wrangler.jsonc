@@ -58,7 +58,8 @@
 		{
 			"binding": "DB",
 			"database_name": "kmp-ai-db",
-			"database_id": "ef3619ac-5659-4447-b36d-119051dd38af"
+			"database_id": "ef3619ac-5659-4447-b36d-119051dd38af",
+			"migrations_dir": "migrations"
 		}
 	],
 	"r2_buckets": [

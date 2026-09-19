@@ -12,8 +12,10 @@ import {
 } from "./modules.js";
 import { fetchAdminPacks, mapAdminError } from "./themeOps.js";
 import { ThemeConsole } from "./ThemeConsole.jsx";
+import { FeedbackConsole } from "./FeedbackConsole.jsx";
 import loginHero from "./assets/login-hero.webp";
 import coverThemes from "./assets/cover-themes.webp";
+import coverFeedback from "./assets/cover-prompts.webp";
 import coverPrompts from "./assets/cover-prompts.webp";
 import coverSkills from "./assets/cover-skills.webp";
 import coverPets from "./assets/cover-pets.webp";
@@ -21,6 +23,7 @@ import emptySoon from "./assets/empty-soon.webp";
 
 const COVERS = {
   themes: coverThemes,
+  feedback: coverFeedback,
   prompts: coverPrompts,
   skills: coverSkills,
   pets: coverPets,
@@ -65,6 +68,7 @@ function Mark({ className }) {
 function IconGlyph({ id }) {
   const paths = {
     themes: "M6 7h20v4H6zm0 7h12v4H6zm0 7h20v4H6z",
+    feedback: "M7 6h18v14H12l-5 6V6zm4 4h10v2H11zm0 4h7v2h-7z",
     prompts: "M8 6h16v14H14l-6 6V6zm4 5h8v2h-8zm0 4h6v2h-6z",
     skills: "M7 20l5-5 3 3 8-8 2 2-10 10-3-3-3 3zm15-13l3 3-2 2-3-3z",
     pets: "M10 14a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm12 0a3 3 0 1 1 0-6 3 3 0 0 1 0 6zM16 26c-5 0-8-3.4-8-7.5S12.2 14 16 14s8 1.6 8 4.5S21 26 16 26z",
@@ -111,7 +115,7 @@ function LoginScreen({ onSubmit, busy, error, value, onChange }) {
       >
         <p className="eyebrow">LuckyAgent</p>
         <h1>一站式运营平台</h1>
-        <p className="muted">主题、Prompt、Skills 与 Pets 的统一入口。口令只存在本页会话，关闭标签页即失效。</p>
+        <p className="muted">主题、反馈、Prompt、Skills 与 Pets 的统一入口。口令只存在本页会话，关闭标签页即失效。</p>
         <label>
           运营口令
           <input
@@ -143,7 +147,7 @@ function HomeScreen({ onOpen }) {
       <header className="home-head">
         <p className="eyebrow">Command deck</p>
         <h1>选择一个运营域</h1>
-        <p className="muted">目前仅主题管理开放。其余入口已预留，不会写入任何货架接口。</p>
+        <p className="muted">主题管理与用户反馈已开放。其余入口已预留，不会写入任何货架接口。</p>
       </header>
       <div className="bento">
         {OPS_MODULES.map((mod, index) => (
@@ -309,6 +313,7 @@ export function App() {
       <main className="stage">
         {path === "/" ? <HomeScreen onOpen={navigate} /> : null}
         {path === "/themes" ? <ThemeConsole token={token} onUnauthorized={logout} /> : null}
+        {path === "/feedback" ? <FeedbackConsole token={token} onUnauthorized={logout} /> : null}
         {current && !isOpenModule(current) ? <ComingSoon mod={current} /> : null}
         {path !== "/" && !current ? (
           <div className="coming">

@@ -11,6 +11,15 @@ export const OPS_MODULES = [
     cover: "themes",
   },
   {
+    id: "feedback",
+    title: "用户反馈",
+    status: "open",
+    href: "/feedback",
+    kicker: "开放",
+    blurb: "差评原因、CSAT 看板与工单收件箱。",
+    cover: "feedback",
+  },
+  {
     id: "prompts",
     title: "Prompt 管理",
     status: "soon",

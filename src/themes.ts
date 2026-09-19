@@ -437,7 +437,8 @@ export async function handleThemeRequest(request: Request, env: Env): Promise<Re
 
 	const isThemePath =
 		path === "/v1/catalog" ||
-		path.startsWith("/v1/admin/") ||
+		path.startsWith("/v1/admin/packs") ||
+		path.startsWith("/v1/admin/catalog") ||
 		path.startsWith("/v1/assets/") ||
 		path.startsWith("/v1/packs/") ||
 		path.startsWith("/assets/packs/");

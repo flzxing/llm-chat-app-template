@@ -18,7 +18,20 @@ const packs = [
   },
 ];
 
-async function mockAdmin(page, writes) {
+async function mockAdmin(page, writes, extras = {}) {
+  const catalog = extras.catalog || {
+    schemaVersion: 1,
+    fallbackLocale: "en-US",
+    reasons: [
+      { id: "off_topic", kind: "preset", enabled: true, sort: 10, labels: { "zh-CN": "答非所问", "en-US": "Off topic" } },
+      { id: "other", kind: "other", enabled: true, sort: 999, labels: { "zh-CN": "其他", "en-US": "Other" } },
+    ],
+    copy: {},
+  };
+  const stats = extras.stats || { open: 2, csat: 80, csat7: 90, totals: { up: 8, down: 2, general: 1 }, topReasons: [{ reason_id: "off_topic", count: 2 }] };
+  const reports = extras.reports || [
+    { id: "rep_1", kind: "down", status: "new", reasonIds: ["off_topic"], otherText: "跑题了", createdAt: Date.now() },
+  ];
   await page.route("**/v1/admin/**", async (route) => {
     const request = route.request();
     const url = request.url();
@@ -32,7 +45,28 @@ async function mockAdmin(page, writes) {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ schemaVersion: 2, packs }) });
       return;
     }
-    writes.push({ url, method });
+    const path = new URL(url).pathname;
+    if (path === "/v1/admin/feedback/catalog" && method === "GET") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(catalog) });
+      return;
+    }
+    if (path === "/v1/admin/feedback/stats" && method === "GET") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(stats) });
+      return;
+    }
+    if (path === "/v1/admin/feedback/reports" && method === "GET") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ reports, total: reports.length }) });
+      return;
+    }
+    if (path === "/v1/admin/feedback/reports/rep_1" && method === "GET") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ...reports[0], attachments: [] }) });
+      return;
+    }
+    writes.push({ url, method, path });
+    if (path === "/v1/admin/feedback/catalog" && method === "PUT") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, catalog }) });
+      return;
+    }
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({ ok: true, count: packs.length, pack: packs[0] }),
@@ -61,6 +95,7 @@ test("login lands on the home deck, not the theme console", async ({ page }) => 
   await login(page);
   await expect(page.getByTestId("home")).toBeVisible();
   await expect(page.getByTestId("module-themes")).toBeVisible();
+  await expect(page.getByTestId("module-feedback")).toBeVisible();
   await expect(page.getByTestId("console")).toHaveCount(0);
 });
 
@@ -106,4 +141,20 @@ test("unsaved editor asks before leaving a pack", async ({ page }) => {
   page.once("dialog", (dialog) => dialog.dismiss());
   await page.getByRole("button", { name: "新建主题" }).click();
   await expect(page.getByTestId("editor-title")).toContainText("小丸子");
+});
+
+test("feedback module can publish reasons and filter inbox", async ({ page }) => {
+  const writes = [];
+  await mockAdmin(page, writes);
+  await login(page);
+  await page.getByTestId("module-feedback").click();
+  await expect(page.getByTestId("feedback-console")).toBeVisible();
+  await page.getByTestId("feedback-tab-reasons").click();
+  await expect(page.getByTestId("reason-row-off_topic")).toBeVisible();
+  await page.getByTestId("reason-save").click();
+  expect(writes.some((item) => item.method === "PUT" && String(item.path).includes("/v1/admin/feedback/catalog"))).toBeTruthy();
+  await page.getByTestId("feedback-tab-inbox").click();
+  await expect(page.getByTestId("inbox-row-rep_1")).toBeVisible();
+  await page.getByTestId("inbox-search").fill("跑题");
+  await expect(page.getByTestId("inbox-row-rep_1")).toBeVisible();
 });

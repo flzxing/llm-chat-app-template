@@ -11,10 +11,10 @@ import {
   readStoredToken,
 } from "./modules.js";
 
-test("only theme management is open", () => {
+test("theme and feedback modules are open", () => {
   assert.deepEqual(
     OPS_MODULES.filter(isOpenModule).map((item) => item.id),
-    ["themes"],
+    ["themes", "feedback"],
   );
   assert.equal(OPS_MODULES.filter((item) => item.status === "soon").length, 3);
 });
@@ -25,9 +25,9 @@ test("parses ops routes and builds hrefs", () => {
   assert.equal(parseOpsPath("/ops/themes"), "/themes");
   assert.equal(parseOpsPath("/ops/prompts/"), "/prompts");
   assert.equal(opsUrl("/"), "/ops/");
-  assert.equal(opsUrl("/themes"), "/ops/themes");
-  assert.equal(moduleByPath("/themes")?.id, "themes");
-  assert.equal(moduleByPath("/prompts")?.status, "soon");
+  assert.equal(parseOpsPath("/ops/feedback"), "/feedback");
+  assert.equal(opsUrl("/feedback"), "/ops/feedback");
+  assert.equal(moduleByPath("/feedback")?.status, "open");
 });
 
 test("migrates legacy theme-admin token", () => {

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test src/themeOps.test.js src/modules.test.js",
+    "test": "node --test src/themeOps.test.js src/modules.test.js src/feedbackOps.test.js",
     "test:e2e": "playwright test",
     "test:e2e:live": "OPS_LIVE=1 playwright test e2e/live"
   },

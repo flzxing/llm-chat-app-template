@@ -18,6 +18,7 @@ import {
 	handleUpdateSessionTitle,
 } from "./routes/sessions";
 import { legacyThemeAdminLocation, shouldServeOpsSpa } from "./http";
+import { handleFeedbackRequest } from "./feedback";
 import { handleThemeRequest } from "./themes";
 import { getToolIndexStatus, initializeToolIndex } from "./tool-router";
 import type { Env } from "./types";
@@ -28,10 +29,11 @@ app.use(
 	"*",
 	cors({
 		origin: "*",
-		allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+		allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 		allowHeaders: [
 			"Content-Type",
 			"Authorization",
+			"If-None-Match",
 			"x-captcha-response",
 			"x-admin-init-key",
 		],
@@ -49,6 +51,8 @@ app.use(
 app.use("*", secureHeaders());
 
 app.use("*", async (c, next) => {
+	const feedback = await handleFeedbackRequest(c.req.raw, c.env);
+	if (feedback) return feedback;
 	const themed = await handleThemeRequest(c.req.raw, c.env);
 	if (themed) return themed;
 	return next();
