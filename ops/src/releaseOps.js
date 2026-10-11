@@ -1,16 +1,16 @@
 export const PART_BYTES = 16 * 1024 * 1024;
 export const MAX_APK_BYTES = 1024 * 1024 * 1024;
 export const UPLOAD_KEY = "lucky-release-upload-v1";
-export const STATUS_LABELS = { draft: "草稿", scheduled: "定时发布", published: "已发布", paused: "已暂停", revoked: "已撤回", uploading: "上传中", verifying: "校验中", verified: "校验通过", rejected: "校验拒绝" };
+export const STATUS_LABELS = { draft: "草稿", scheduled: "定时发布", published: "已发布", paused: "已暂停", revoked: "已撤回", uploading: "上传中", verifying: "等待本地校验", verified: "校验通过", rejected: "校验拒绝" };
 const ERROR_COPY = {
  unauthorized: "运营会话无效，请重新登录。", publish_credential_required: "发布凭证无效。编辑权限不能代替发布权限。",
  revision_conflict: "这个版本已被其他操作修改。请刷新后重新核对。", version_already_exists: "这个 versionCode 已建立版本，请编辑已有草稿。",
  version_must_increase: "正式版本号必须高于已发布版本。修复包也需要递增 versionCode。",
  mandatory_target_incompatible: "强制升级目标不兼容全部支持设备，不能启用最低版本策略。",
  release_keys_not_configured: "正式证书或策略签名尚未配置，暂不能发布。",
- artifact_not_verified: "APK 尚未通过云端校验。", zh_en_content_required: "请补齐简体中文、英文标题、摘要和日志，亮点最多三条。",
+ artifact_not_verified: "APK 尚未通过发布机校验与服务端验签。", zh_en_content_required: "请补齐简体中文、英文标题、摘要和日志，亮点最多三条。",
  missing_parts: "还有分片没有上传完成，请重选原文件恢复。", part_hash_mismatch: "分片校验不一致，请重新上传该分片。",
- upload_closed: "这个上传会话已关闭，请刷新查看状态。", invalid_policy: "请核对灰度比例和最低版本号。",
+ artifact_storage_quota: "升级包存储达到 8 GiB 配额，请先清理未发布制品。", artifact_in_use: "制品已被版本引用，不能删除。", upload_closed: "这个上传会话已关闭，请刷新查看状态。", invalid_policy: "请核对灰度比例和最低版本号。",
  invalid_schedule: "发布时间无效。", reason_required: "请填写本次操作原因。", release_revoked: "版本已撤回，不能恢复。请上传更高版本的修复包。",
 };
 export function releaseError(error) { return ERROR_COPY[error?.code] || (error?.name === "AbortError" ? "上传已停止，重选同一文件可以恢复。" : "操作未完成，请检查网络后重试。已有草稿和分片会保留。"); }

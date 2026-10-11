@@ -5,9 +5,7 @@ import cover from "./assets/cover-releases.webp";
 import crystal from "./assets/update-crystal.webp";
 import "./releases.css";
 
-const STAGES = ["上传 APK", "云端校验", "更新内容", "发布策略", "客户端预览", "发布复核"];
-const VERIFICATION_STAGES = ["hash", "signature", "manifest", "archive", "complete"];
-const VERIFICATION_LABELS = ["SHA-256", "真实签名", "清单身份", "ABI 结构", "发布证书"];
+const STAGES = ["上传 APK", "发布机校验", "更新内容", "发布策略", "客户端预览", "发布复核"];
 const FUNNEL_LABELS = ["看到更新", "开始下载", "下载完成", "发起安装", "实际升级"];
 function Pill({ status }) { return <span className={`release-pill ${status}`}>{STATUS_LABELS[status] || status}</span>; }
 function Dialog({ title, children, onClose, wide = false }) {
@@ -25,7 +23,7 @@ function PhonePreview({ content, report, mode, theme, phase, language }) {
     <div className="release-update-body"><span className="release-preview-badge">{mandatory ? "需要更新" : "全新版本"} · {report?.versionName || "—"}</span>
      <h3>{content.titles[lang] || "下一次进步，即将发生"}</h3><p>{content.summaries[lang] || "写下这次更新带给用户的改变。"}</p>
      <ul>{(content.highlights[lang] || []).map((text, i) => <li key={i}><span>✦</span>{text}</li>)}</ul>
-     <small>{report ? `${report.versionName} · ${formatBytes(report.bytes)}` : "版本身份由云端校验后生成"}</small>
+     <small>{report ? `${report.versionName} · ${formatBytes(report.bytes)}` : "版本身份由 Android SDK 校验后生成"}</small>
      {phase === "download" ? <div className="release-preview-progress"><span /><p>52% · 2.4 MB/s · 约 28 秒</p></div> : null}
      <button type="button" tabIndex={-1}>{phase === "install" ? "安装更新" : phase === "download" ? "后台下载中" : "立即更新"}</button>
      {!mandatory && phase !== "install" ? <p className="release-preview-later">{phase === "download" ? "收起，继续使用" : "稍后提醒　 ·　 忽略此版本"}</p> : null}
@@ -77,7 +75,7 @@ export function ReleaseConsole({ token, onUnauthorized }) {
   try {
    const result = await uploadApk({ token, file, resumeId: resumable, signal: controller.signal,
     onSession: id => retainUpload({ id, name: file.name, bytes: file.size }), onProgress: setTransfer });
-   retainUpload(null); setNotice(result.status === "verified" ? "云端校验已通过，可以创建版本草稿。" : "APK 已提交云端校验。通过后即可编辑并预览。" ); await refresh(true);
+   retainUpload(null); setNotice(result.status === "verified" ? "发布机校验已通过，可以创建版本草稿。" : "APK 上传完成。请在 Mac 执行下方校验命令，通过后即可创建草稿。" ); await refresh(true);
   } catch (cause) { if (!controller.signal.aborted) failure(cause); }
   finally { if (abortRef.current === controller) abortRef.current = null; setTransfer(null); if (fileRef.current) fileRef.current.value = ""; }
  }
@@ -151,7 +149,7 @@ export function ReleaseConsole({ token, onUnauthorized }) {
      <div className="release-upload-glyph" aria-hidden="true">↑</div><div><h3>{upload ? `继续上传 ${upload.name}` : "拖入 APK，或选择文件"}</h3><p>{upload ? "重选原文件后会核对已上传分片，不会盲目续传。" : "16 MB 分片 · 三路并发 · 失败自动重试"}</p></div><label className="release-button primary" htmlFor="release-apk-file">{upload ? "重选原文件" : "选择 APK"}</label>
     </div>
     {transfer ? <div className="release-transfer" aria-live="polite"><div><strong>{transfer.stage}</strong><span>{formatBytes(transfer.bytes)} / {formatBytes(transfer.total)} · {formatBytes(transfer.speed)}/s</span></div><progress max={transfer.total} value={transfer.bytes} aria-label="APK 上传进度" /><button className="ghost" onClick={cancelUpload}>取消并清理</button></div> : upload ? <div className="release-resume"><span>上传会话保留 24 小时，可刷新后恢复。</span><button className="ghost" onClick={cancelUpload} disabled={busy === "cancel-upload"}>取消这个上传</button></div> : null}
-    <div className="release-artifacts">{data.artifacts.map(artifact => <div className="release-artifact" key={artifact.id}><div><strong>{artifact.report ? `v${artifact.report.versionName} · ${artifact.report.versionCode}` : artifact.file_name}</strong><small>{formatBytes(artifact.size)} · {artifact.report?.packageName || "等待云端解析身份"}</small></div><Pill status={artifact.status} /><div className="release-artifact-action">{artifact.status === "verified" ? <button onClick={() => openEditor(artifact, true)} disabled={data.releases.some(r => r.artifact_id === artifact.id)}>创建草稿 →</button> : artifact.status === "rejected" ? <span className="error">{artifact.error || "APK 校验失败"}</span> : <span className="release-validation-steps" aria-live="polite">{VERIFICATION_LABELS.map((label, index) => <small key={label} data-complete={VERIFICATION_STAGES.indexOf(artifact.verification_stage) >= index}>{VERIFICATION_STAGES.indexOf(artifact.verification_stage) >= index ? "✓ " : "○ "}{label}</small>)}</span>}</div></div>)}</div>
+    <div className="release-artifacts">{data.artifacts.map(artifact => <div className="release-artifact" key={artifact.id}><div><strong>{artifact.report ? `v${artifact.report.versionName} · ${artifact.report.versionCode}` : artifact.file_name}</strong><small>{formatBytes(artifact.size)} · {artifact.report?.packageName || "等待 Mac 校验身份"}</small></div><Pill status={artifact.status} /><div className="release-artifact-action">{artifact.status === "verified" ? <button onClick={() => openEditor(artifact, true)} disabled={data.releases.some(r => r.artifact_id === artifact.id)}>创建草稿 →</button> : artifact.status === "rejected" ? <span className="error">{artifact.error || "APK 校验失败"}</span> : <div className="release-validation-steps" aria-live="polite"><small>在发布 Mac 的 Worker 仓库运行；完成后刷新此页。</small><code style={{overflowWrap: "anywhere", userSelect: "all"}}>node scripts/app-release.mjs --verify --artifact {artifact.id}</code></div>}</div></div>)}</div>
    </section>
    <section className="release-panel"><div className="release-section-head"><div><p className="eyebrow">02 / RELEASES</p><h2>版本发布台账</h2></div><div className="release-filters"><input aria-label="搜索版本" placeholder="搜索版本或标题" value={search} onChange={e => setSearch(e.target.value)} /><select aria-label="筛选发布状态" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">全部状态</option>{["draft", "scheduled", "published", "paused", "revoked"].map(v => <option key={v} value={v}>{STATUS_LABELS[v]}</option>)}</select></div></div>
     {shown.length ? <div className="release-list">{shown.map(row => <button className="release-row" key={row.id} onClick={() => openEditor(row)}><div className="release-version-icon">↗</div><div className="release-row-title"><strong>v{row.versionName}<small>#{row.version_code}</small></strong><span>{row.content?.titles?.["zh-CN"] || "未命名更新"}</span></div><Pill status={row.status} /><div className="release-row-meta"><strong>{row.rollout}% 灰度</strong><small>{formatBytes(row.bytes)} · 修订 {row.revision}</small><small title={funnelFor(events, row.id).map((point, i) => `${FUNNEL_LABELS[i]} ${point.count}`).join(" → ")}>曝光 {funnelFor(events, row.id)[0].count} · 实际升级 {funnelFor(events, row.id)[4].count}</small></div><span aria-hidden="true">↗</span></button>)}</div> : <div className="release-empty"><span>✧</span><h3>{search || filter !== "all" ? "没有匹配的版本" : "下一次更新，从这里出发"}</h3><p>上传并通过校验后，创建第一个版本草稿。</p></div>}

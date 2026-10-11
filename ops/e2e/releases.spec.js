@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test";
 const content = { titles: { "zh-CN": "让每一次探索，更进一步", "en-US": "A little further. A lot better." }, summaries: { "zh-CN": "更顺畅的创作，更可靠的后台任务，以及恰到好处的细节。", "en-US": "A smoother way to create and explore." }, highlights: { "zh-CN": ["更流畅的对话与创作", "更可靠的后台任务", "精心打磨的细节体验"], "en-US": ["Smoother conversations", "Reliable background work", "Thoughtful details"] }, notes: { "zh-CN": "优化了后台任务恢复。\n修复了长对话中的细节问题。", "en-US": "Improved task recovery.\nPolished conversation details." } };
 const report = { packageName: "com.flzxing.lucky", versionCode: 12, versionName: "1.2.0", minSdk: 26, abis: ["arm64-v8a"], certificateSha256: "a".repeat(64), sha256: "b".repeat(64), bytes: 136314880 };
-async function mock(page, { status = "draft" } = {}) {
+async function mock(page, { status = "draft", awaitingLocal = false } = {}) {
  const writes = [];
  await page.route("**/v1/admin/**", async route => {
   const request = route.request(), path = new URL(request.url()).pathname;
   if (request.headers().authorization !== "Bearer editor-test") { await route.fulfill({ status: 401, json: { error: "unauthorized" } }); return; }
   if (path === "/v1/admin/packs") { await route.fulfill({ json: { packs: [] } }); return; }
-  if (path.endsWith("/releases") && request.method() === "GET") { await route.fulfill({ json: { releases: [{ id: "release-12", artifact_id: "artifact-12", artifactId: "artifact-12", version_code: 12, versionName: "1.2.0", status, revision: 1, rollout: 5, min_version_code: 0, bytes: report.bytes, content, report }], artifacts: [{ id: "artifact-12", file_name: "luckytool.apk", size: report.bytes, status: "verified", report }] } }); return; }
+  if (path.endsWith("/releases") && request.method() === "GET") { await route.fulfill({ json: { releases: [{ id: "release-12", artifact_id: "artifact-12", artifactId: "artifact-12", version_code: 12, versionName: "1.2.0", status, revision: 1, rollout: 5, min_version_code: 0, bytes: report.bytes, content, report }], artifacts: [{ id: "artifact-12", file_name: "luckytool.apk", size: report.bytes, status: awaitingLocal ? "verifying" : "verified", report: awaitingLocal ? null : report }] } }); return; }
   if (path.endsWith("/stats")) { await route.fulfill({ json: { events: [{ release_id: "release-12", kind: "offered", devices: 100 }, { release_id: "release-12", kind: "download_started", devices: 80 }], failures: [{ detail: "storage_insufficient", count: 2 }] } }); return; }
   if (path.endsWith("/audit")) { await route.fulfill({ json: { entries: [{ id: "audit-1", actor: "release-editor", action: "draft_created", reason: "准备更新", created_at: Date.now(), before_json: "null", after_json: JSON.stringify({ revision: 1 }) }] } }); return; }
   writes.push({ path, data: request.postDataJSON(), credential: request.headers()["x-release-credential"] });
@@ -65,4 +65,11 @@ test("publication errors preserve the editor and clear the one-use credential", 
  await expect(page.getByRole("dialog", { name: "发布复核", exact: true }).getByRole("alert")).toContainText("发布凭证无效");
  await expect(page.getByLabel("独立发布凭证")).toHaveValue("");
  await expect(page.getByRole("dialog", { name: "版本工作室 · v1.2.0" })).toBeVisible();
+});
+
+test("pending APK explains the local command without claiming cloud SDK validation", async ({ page }) => {
+ await mock(page, { awaitingLocal: true });
+ await expect(page.getByText("等待本地校验", { exact: true })).toBeVisible();
+ await expect(page.locator("code")).toContainText("node scripts/app-release.mjs --verify --artifact artifact-12");
+ await expect(page.getByText("云端校验", { exact: true })).toHaveCount(0);
 });
