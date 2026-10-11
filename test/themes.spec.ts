@@ -1,4 +1,5 @@
-import { env, SELF } from "cloudflare:test";
+import { env, SELF, createExecutionContext } from "cloudflare:test";
+import worker from "../src/index";
 import { describe, expect, it } from "vitest";
 import { legacyThemeAdminLocation, shouldServeOpsSpa } from "../src/http";
 import {
@@ -335,4 +336,16 @@ describe("ops console routing", () => {
 		expect(shouldServeOpsSpa("/ops/assets/index.js")).toBe(false);
 		expect(shouldServeOpsSpa("/chat.js")).toBe(false);
 	});
+});
+
+
+describe("production static asset canonicalization", () => {
+ it("serves a deep ops URL without redirecting index.html to the home page", async () => {
+  const configuration = { ...env, ASSETS: { fetch: async (request: Request) => {
+   const path = new URL(request.url).pathname;
+   return path === '/ops/' ? new Response('ops-spa') : new Response(null, {status:307,headers:{location:'/ops/'}});
+  } } };
+  const response = await worker.fetch(new Request('https://luckyaitool.com/ops/releases'), configuration as typeof env, createExecutionContext());
+  expect(response.status).toBe(200); expect(await response.text()).toBe('ops-spa'); expect(response.headers.has('location')).toBe(false);
+ });
 });

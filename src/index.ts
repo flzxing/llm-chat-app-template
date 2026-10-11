@@ -186,7 +186,7 @@ app.all("*", async (c) => {
 	const legacy = legacyThemeAdminLocation(url);
 	if (legacy) return c.redirect(legacy, 301);
 	if (shouldServeOpsSpa(url.pathname)) {
-		return c.env.ASSETS.fetch(new Request(new URL("/ops/index.html", url.origin), c.req.raw));
+		return c.env.ASSETS.fetch(new Request(new URL("/ops/", url.origin), c.req.raw));
 	}
 	return c.env.ASSETS.fetch(c.req.raw);
 });

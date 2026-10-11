@@ -27,7 +27,7 @@ async function policy(extra={}) {
 try {
  check('unsigned attestation rejected',(await call('/v1/internal/app-updates/verification','POST',{})).response.status===401);
  check('editor session authenticated',(await call('/v1/admin/app-updates/session')).response.status===200);
- check('ops entry live',(await fetch(origin+'/ops/releases')).status===200);
+ check('ops entry live',(await fetch(origin+'/ops/releases',{redirect:'manual'})).status===200);
  check('policy signature and binding',(await policy()).installId===input.installId);
  if (!origin.includes('staging')) {
   assert.equal(origin,'https://luckyaitool.com');

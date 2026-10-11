@@ -6,7 +6,7 @@ export default {
   const response = await handleAppUpdateRequest(request, env);
   if (response) return response;
   const url = new URL(request.url);
-  if ((url.pathname === '/ops' || url.pathname.startsWith('/ops/')) && !url.pathname.split('/').pop()?.includes('.')) return env.ASSETS.fetch(new Request(new URL('/ops/index.html', url.origin), request));
+  if ((url.pathname === '/ops' || url.pathname.startsWith('/ops/')) && !url.pathname.split('/').pop()?.includes('.')) return env.ASSETS.fetch(new Request(new URL('/ops/', url.origin), request));
   return env.ASSETS.fetch(request);
  },
  scheduled(_event: ScheduledController, env: Env, context: ExecutionContext) { context.waitUntil(maintainAppUpdates(env)); },
