@@ -45,7 +45,8 @@
 		"test:watch": "vitest",
 		"test:services": "vitest run --config vitest.services.config.ts",
 		"test:manual": "node scripts/manual-api-check.mjs",
-		"test:local:all": "npm run test && npm run test:manual"
+		"test:local:all": "npm run test && npm run test:manual",
+		"test:release-tools": "node --test scripts/app-release.test.mjs && python3 -m unittest discover -s scripts -p 'test_apk_inspect.py'"
 	},
 	"dependencies": {
 		"better-auth": "^1.6.2",

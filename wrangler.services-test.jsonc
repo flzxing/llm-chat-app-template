@@ -29,12 +29,4 @@
       "bucket_name": "services-themes-test"
     }
   ],
-  "queues": {
-    "producers": [
-      {
-        "binding": "UPDATE_VERIFY_QUEUE",
-        "queue": "services-updates-test"
-      }
-    ]
-  }
 }

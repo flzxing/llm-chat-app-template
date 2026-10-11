@@ -64,7 +64,6 @@
 		}
 	],
 	"triggers": { "crons": ["*/5 * * * *"] },
- "queues": { "producers": [{ "binding": "UPDATE_VERIFY_QUEUE", "queue": "lucky-apk-verification" }] },
  "r2_buckets": [
   { "binding": "APP_RELEASES", "bucket_name": "lucky-app-releases" },
 		{

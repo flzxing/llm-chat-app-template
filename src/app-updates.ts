@@ -1,17 +1,15 @@
 import type { Env } from './types';
-import { createHash } from 'node:crypto';
 
 export const UPDATE_PART_BYTES = 16 * 1024 * 1024;
 export const UPDATE_MAX_BYTES = 1024 * 1024 * 1024;
 const DAY = 86_400_000;
 const PACKAGE = 'com.flzxing.lucky';
 const json = (data: unknown, status = 200) => Response.json(data, { status, headers: { 'cache-control': 'no-store' } });
-type Artifact = { id: string; object_key: string; file_name: string; size: number; upload_id: string | null; status: string; report_json: string | null; error: string | null; created_at: number };
+type Artifact = { id: string; object_key: string; file_name: string; size: number; upload_id: string | null; status: string; report_json: string | null; error: string | null; created_at: number; object_version: string | null; verification_nonce: string | null };
 export type VerificationReport = { packageName: string; versionCode: number; versionName: string; minSdk: number; targetSdk: number; abis: string[]; certificateSha256: string; sha256: string; bytes: number; debuggable: boolean };
 export type ReleaseContent = { titles: Record<string, string>; summaries: Record<string, string>; highlights: Record<string, string[]>; notes: Record<string, string>; heroUrl?: string };
 type Release = { id: string; artifact_id: string; version_code: number; channel: string; status: string; revision: number; rollout: number; min_version_code: number; scheduled_at: number | null; content_json: string; report_json: string; created_at: number; updated_at: number };
 type CheckInput = { protocolVersion: number; packageName: string; versionCode: number; abi: string; sdkInt: number; channel: string; installId: string; locale?: string; artifactId?: string };
-const hex = (bytes: ArrayBuffer) => Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
 export const base64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 function unbase64(text: string) { return Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)); }
 function integer(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max; }
@@ -126,6 +124,7 @@ async function download(request: Request, env: Env, id: string) {
  if (!row) return json({ error: 'release_unavailable' }, 410);
  const headers = new Headers({ 'content-type': 'application/vnd.android.package-archive', 'content-disposition': 'attachment; filename="LuckyTool.apk"', 'accept-ranges': 'bytes', 'cache-control': 'no-store' });
  const meta = await env.APP_RELEASES.head(row.object_key); if (!meta) return json({ error: 'artifact_missing' }, 404);
+ if (!row.object_version || meta.version !== row.object_version) return json({ error: 'artifact_changed' }, 410);
  headers.set('etag', meta.httpEtag);
  let offset = 0, length = meta.size;
  const range = request.headers.get('range');
@@ -144,29 +143,27 @@ async function download(request: Request, env: Env, id: string) {
 }
 async function verification(request: Request, env: Env) {
  const raw = new TextDecoder().decode(await boundedBytes(request, 16000));
- const timestamp = request.headers.get('x-verification-time') || '';
- if (!env.UPDATE_VERIFICATION_SECRET || !/^\d{13}$/.test(timestamp) || Math.abs(Date.now() - Number(timestamp)) > 300000) return json({ error: 'unauthorized' }, 401);
- const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.UPDATE_VERIFICATION_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
- const expected = hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${timestamp}.${raw}`)));
- if (!await constantEqual(expected, request.headers.get('x-verification-signature') || '')) return json({ error: 'unauthorized' }, 401);
- const input = JSON.parse(raw) as { artifactId: string; stage?: string; report?: VerificationReport; error?: string };
+ const envelope = JSON.parse(raw) as { payload?: string; signature?: string; keyId?: string };
+ const publicKeys: Record<string, string> = JSON.parse(env.UPDATE_ATTESTATION_PUBLIC_KEYS_JSON || '{}');
+ if (!envelope.keyId || !publicKeys[envelope.keyId] || !envelope.payload || !envelope.signature) return json({ error: 'unauthorized' }, 401);
+ try {
+  const key = await crypto.subtle.importKey('spki', unbase64(publicKeys[envelope.keyId]), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+  if (!await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, unbase64(envelope.signature), new TextEncoder().encode(envelope.payload))) return json({ error: 'unauthorized' }, 401);
+ } catch { return json({ error: 'unauthorized' }, 401); }
+ const input = JSON.parse(new TextDecoder().decode(unbase64(envelope.payload))) as { artifactId: string; origin: string; issuedAt: number; nonce: string; objectVersion: string; report?: VerificationReport; error?: string };
+ if (input.origin !== new URL(request.url).origin || !integer(input.issuedAt) || Math.abs(Date.now() - input.issuedAt) > 300000) return json({ error: 'attestation_expired_or_wrong_origin' }, 401);
  const artifact = await env.DB.prepare('SELECT * FROM update_artifacts WHERE id=?').bind(input.artifactId).first<Artifact>();
  if (!artifact) return json({ error: 'not_found' }, 404);
- if (artifact.status !== 'verifying') return json({ ok: true, duplicate: true });
- if (input.stage) {
-  const stages = ['hash', 'signature', 'manifest', 'archive'];
-  if (!stages.includes(input.stage) || input.report || input.error) return json({ error: 'invalid_verification_stage' }, 400);
-  // Duplicate or reordered progress cannot move the display backwards.
-  await env.DB.prepare("UPDATE update_artifacts SET verification_stage=?,updated_at=? WHERE id=? AND status='verifying' AND COALESCE(verification_stage,'') IN (" + ['', ...stages.slice(0, stages.indexOf(input.stage) + 1)].map(() => '?').join(',') + ')')
-   .bind(input.stage, Date.now(), artifact.id, '', ...stages.slice(0, stages.indexOf(input.stage) + 1)).run();
-  return json({ ok: true });
- }
+ if (!input.nonce || input.nonce !== artifact.verification_nonce || input.objectVersion !== artifact.object_version) return json({ error: 'artifact_binding_mismatch' }, 409);
+ if (artifact.status !== 'verifying') return ['verified','rejected'].includes(artifact.status) ? json({ ok: true, duplicate: true }) : json({ error: 'upload_closed' }, 409);
+ const object = await env.APP_RELEASES.head(artifact.object_key);
+ if (!object || object.version !== input.objectVersion || object.size !== artifact.size) return json({ error: 'artifact_changed' }, 409);
  const accepted = !!input.report && validateReport(input.report, artifact, env.UPDATE_RELEASE_CERT_SHA256 || '', env.UPDATE_PACKAGE_NAME || PACKAGE);
  await env.DB.batch([
   env.DB.prepare("UPDATE update_artifacts SET status=?, report_json=?, error=?, verification_stage=?, updated_at=? WHERE id=? AND status='verifying'").bind(accepted ? 'verified' : 'rejected', accepted ? JSON.stringify(input.report) : null, accepted ? null : (input.error || 'apk_identity_rejected').slice(0, 500), accepted ? 'complete' : 'rejected', Date.now(), artifact.id),
   env.DB.prepare('UPDATE update_verification_jobs SET completed_at=? WHERE artifact_id=?').bind(Date.now(), artifact.id),
+  env.DB.prepare('INSERT OR IGNORE INTO update_audit VALUES (?,?,?,?,?,?,?,?)').bind(`verification:${artifact.id}`, `release-machine:${envelope.keyId}`, accepted ? 'verified' : 'rejected', null, artifact.id, 'null', JSON.stringify(accepted ? input.report : input.error || 'apk_identity_rejected'), Date.now()),
  ]);
- await audit(env, 'apk-verifier', accepted ? 'verified' : 'rejected', null, artifact.id, null, accepted ? input.report : input.error);
  return json({ ok: true, accepted });
 }
 async function uploads(request: Request, env: Env, path: string, actor: string) {
@@ -175,46 +172,48 @@ async function uploads(request: Request, env: Env, path: string, actor: string) 
   if (!integer(input.bytes, 1, UPDATE_MAX_BYTES) || typeof input.fileName !== 'string' || !input.fileName.toLowerCase().endsWith('.apk') || input.fileName.length > 200) return json({ error: 'invalid_apk' }, 400);
   const id = crypto.randomUUID(), key = `quarantine/${id}.apk`, now = Date.now();
   const upload = await env.APP_RELEASES.createMultipartUpload(key, { httpMetadata: { contentType: 'application/vnd.android.package-archive' } });
-  try { await env.DB.prepare('INSERT INTO update_artifacts(id,object_key,file_name,size,upload_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(id, key, input.fileName, input.bytes, upload.uploadId, 'uploading', now, now).run(); } catch (error) { await upload.abort(); throw error; }
+  try {
+   // Atomic feature storage cap: existing theme R2 usage must still be budgeted separately.
+   const inserted = await env.DB.prepare("INSERT INTO update_artifacts(id,object_key,file_name,size,upload_id,status,created_at,updated_at) SELECT ?,?,?,?,?,?,?,? WHERE COALESCE((SELECT SUM(size) FROM update_artifacts WHERE status NOT IN ('cancelled','expired')),0)+?<=?").bind(id, key, input.fileName, input.bytes, upload.uploadId, 'uploading', now, now, input.bytes, 8 * 1024 ** 3).run();
+   if (!inserted.meta.changes) { await upload.abort(); return json({ error: 'artifact_storage_quota' }, 409); }
+  } catch (error) { await upload.abort(); throw error; }
   await audit(env, actor, 'upload_created', null, id, null, { bytes: input.bytes });
   return json({ id, partBytes: UPDATE_PART_BYTES, maxConcurrency: 3 });
  }
- const m = /^\/v1\/admin\/app-updates\/uploads\/([a-zA-Z0-9_-]+)(?:\/(parts)(?:\/(\d+))?|\/(complete|retry))?$/.exec(path);
+ const m = /^\/v1\/admin\/app-updates\/uploads\/([a-zA-Z0-9_-]+)(?:\/(parts)(?:\/(\d+))?|\/(complete|source))?$/.exec(path);
  if (!m) return null;
  const artifact = await env.DB.prepare('SELECT * FROM update_artifacts WHERE id=?').bind(m[1]).first<Artifact>();
  if (!artifact) return json({ error: 'not_found' }, 404);
+ if (m[4] === 'source' && request.method === 'GET') {
+  if (artifact.status !== 'verifying') return json({ error: 'upload_closed' }, 409);
+  const object = await env.APP_RELEASES.get(artifact.object_key);
+  if (!object || object.version !== artifact.object_version) return json({ error: 'artifact_changed' }, 409);
+  return new Response(object.body, { headers: { 'content-type': 'application/vnd.android.package-archive', 'content-length': String(object.size), 'cache-control': 'no-store', 'etag': object.httpEtag, 'x-artifact-version': object.version } });
+ }
  if (request.method === 'GET') {
   const parts = (await env.DB.prepare('SELECT part_number,sha256,size FROM update_upload_parts WHERE artifact_id=? ORDER BY part_number').bind(artifact.id).all()).results;
   return json({ ...artifact, upload_id: undefined, object_key: undefined, report: artifact.report_json ? JSON.parse(artifact.report_json) : null, parts, partBytes: UPDATE_PART_BYTES });
  }
- if (m[4] === 'retry' && request.method === 'POST' && artifact.status === 'verifying') {
-  await env.UPDATE_VERIFY_QUEUE.send({ artifactId: artifact.id, objectKey: artifact.object_key, bytes: artifact.size }); return json({ ok: true });
- }
  if (m[4] === 'complete' && request.method === 'POST' && ['verifying','verified','rejected'].includes(artifact.status)) return json({ ok: true, status: artifact.status });
- if (artifact.status !== 'uploading' || !artifact.upload_id) return json({ error: 'upload_closed' }, 409);
- const upload = env.APP_RELEASES.resumeMultipartUpload(artifact.object_key, artifact.upload_id);
  if (request.method === 'DELETE') {
-  await upload.abort(); await env.DB.prepare("UPDATE update_artifacts SET status='cancelled',updated_at=? WHERE id=? AND status='uploading'").bind(Date.now(), artifact.id).run();
+  const release = await env.DB.prepare('SELECT id FROM update_releases WHERE artifact_id=? LIMIT 1').bind(artifact.id).first();
+  if (release) return json({ error: 'artifact_in_use' }, 409);
+  // Claim cancellation before cleanup so a concurrent attestation cannot verify it.
+  await env.DB.prepare("UPDATE update_artifacts SET status='cancelled',updated_at=? WHERE id=?").bind(Date.now(), artifact.id).run();
+  if (artifact.upload_id) { try { await env.APP_RELEASES.resumeMultipartUpload(artifact.object_key, artifact.upload_id).abort(); } catch { /* already completed */ } }
+  await env.APP_RELEASES.delete(artifact.object_key);
   await audit(env, actor, 'upload_cancelled', null, artifact.id, null, null); return json({ ok: true });
  }
+ if (artifact.status !== 'uploading' || !artifact.upload_id) return json({ error: 'upload_closed' }, 409);
+ const upload = env.APP_RELEASES.resumeMultipartUpload(artifact.object_key, artifact.upload_id);
  if (m[3] && request.method === 'PUT') {
   const number = Number(m[3]), count = Math.ceil(artifact.size / UPDATE_PART_BYTES), expectedSize = Math.min(UPDATE_PART_BYTES, artifact.size - (number - 1) * UPDATE_PART_BYTES);
   const size = Number(request.headers.get('content-length')), digest = request.headers.get('x-part-sha256') || '';
   if (!integer(number, 1, count) || size !== expectedSize || !/^[a-f0-9]{64}$/.test(digest) || !request.body) return json({ error: 'invalid_part' }, 400);
-  const hasher = createHash('sha256');
-  let received = 0;
-  const stream = request.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({ transform(chunk, controller) {
-   received += chunk.byteLength;
-   if (received > expectedSize) throw new Error('part_too_large');
-   hasher.update(chunk); controller.enqueue(chunk);
-  } }));
-  // R2 requires a known stream length; retain streaming hash verification without buffering.
+  // The browser hash is a resume hint, never a server validation claim.
+  // Only the release machine's signed read-back report authorizes publication.
   const fixed = new FixedLengthStream(expectedSize);
-  const [part] = await Promise.all([upload.uploadPart(number, fixed.readable), stream.pipeTo(fixed.writable)]);
-  if (received !== expectedSize || hasher.digest('hex') !== digest) {
-   await env.DB.prepare('DELETE FROM update_upload_parts WHERE artifact_id=? AND part_number=?').bind(artifact.id, number).run();
-   return json({ error: 'part_hash_mismatch' }, 400);
-  }
+  const [part] = await Promise.all([upload.uploadPart(number, fixed.readable), request.body.pipeTo(fixed.writable)]);
   await env.DB.prepare('INSERT INTO update_upload_parts VALUES (?,?,?,?,?) ON CONFLICT(artifact_id,part_number) DO UPDATE SET etag=excluded.etag,sha256=excluded.sha256,size=excluded.size').bind(artifact.id, number, part.etag, digest, size).run();
   return json({ number, etag: part.etag });
  }
@@ -228,17 +227,12 @@ async function uploads(request: Request, env: Env, path: string, actor: string) 
   }
   if (object.size !== artifact.size) return json({ error: 'size_mismatch' }, 409);
   await env.DB.batch([
-   env.DB.prepare("UPDATE update_artifacts SET status='verifying',upload_id=NULL,updated_at=? WHERE id=? AND status='uploading'").bind(Date.now(), artifact.id),
+   env.DB.prepare("UPDATE update_artifacts SET status='verifying',upload_id=NULL,object_version=?,verification_nonce=?,verification_stage='awaiting_local',updated_at=? WHERE id=? AND status='uploading'").bind(object.version, crypto.randomUUID(), Date.now(), artifact.id),
    env.DB.prepare('INSERT OR IGNORE INTO update_verification_jobs(artifact_id) VALUES (?)').bind(artifact.id),
   ]);
-  await dispatchVerification(env, artifact.id, artifact.object_key, artifact.size);
   return json({ ok: true, status: 'verifying' });
  }
  return json({ error: 'method_not_allowed' }, 405);
-}
-async function dispatchVerification(env: Env, id: string, key: string, bytes: number) {
- await env.UPDATE_VERIFY_QUEUE.send({ artifactId: id, objectKey: key, bytes });
- await env.DB.prepare('UPDATE update_verification_jobs SET dispatched_at=?,attempts=attempts+1 WHERE artifact_id=?').bind(Date.now(), id).run();
 }
 async function releases(request: Request, env: Env, path: string, actor: string, origin: string) {
  if (path === '/v1/admin/app-updates/releases' && request.method === 'GET') {
@@ -313,7 +307,7 @@ async function activateScheduled(env: Env) {
  }
 }
 export async function maintainAppUpdates(env: Env) {
- if (!env.APP_RELEASES || !env.UPDATE_VERIFY_QUEUE) return;
+ if (!env.APP_RELEASES) return;
  await activateScheduled(env);
  const expired = (await env.DB.prepare("SELECT * FROM update_artifacts WHERE status='uploading' AND created_at<? LIMIT 50").bind(Date.now() - DAY).all<Artifact>()).results;
  for (const a of expired) {
@@ -321,12 +315,9 @@ export async function maintainAppUpdates(env: Env) {
   await env.APP_RELEASES.delete(a.object_key);
   await env.DB.prepare("UPDATE update_artifacts SET status='expired' WHERE id=? AND status='uploading'").bind(a.id).run();
  }
- const pending = (await env.DB.prepare("SELECT a.* FROM update_artifacts a JOIN update_verification_jobs j ON j.artifact_id=a.id WHERE a.status='verifying' AND j.completed_at IS NULL AND (j.dispatched_at IS NULL OR j.dispatched_at<?) AND j.attempts<4 LIMIT 20").bind(Date.now() - 15 * 60000).all<Artifact>()).results;
- for (const a of pending) await dispatchVerification(env, a.id, a.object_key, a.size);
  await env.DB.batch([
   env.DB.prepare('DELETE FROM update_rate_limits WHERE expires_at<?').bind(Date.now()),
   env.DB.prepare('DELETE FROM update_events WHERE created_at<?').bind(Date.now() - 30 * DAY),
-  env.DB.prepare("UPDATE update_artifacts SET status='rejected',error='verification_timeout' WHERE status='verifying' AND id IN(SELECT artifact_id FROM update_verification_jobs WHERE attempts>=4 AND dispatched_at<?)").bind(Date.now() - 15 * 60000),
  ]);
 }
 export async function handleAppUpdateRequest(request: Request, env: Env): Promise<Response | null> {

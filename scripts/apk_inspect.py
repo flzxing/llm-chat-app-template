@@ -8,7 +8,6 @@ import re
 import subprocess
 import tempfile
 import zipfile
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 TOOLS = os.environ.get('ANDROID_BUILD_TOOLS', '/opt/android/build-tools/36.0.0')
 MAX_BYTES = 1024 ** 3
@@ -50,56 +49,11 @@ def parse_badging(text, certificate, size, digest, path=None):
     return dict(packageName=package[1], versionCode=int(package[2]), versionName=package[3], minSdk=int(sdk[1]), targetSdk=int(target[1]), abis=abis, certificateSha256=certificate.lower(), sha256=digest, bytes=size, debuggable='application-debuggable' in text)
 
 
-class Handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        if self.path != '/verify':
-            self.send_error(404)
-            return
-        try:
-            length = int(self.headers.get('content-length', '0'))
-            if not 0 < length <= MAX_BYTES:
-                raise ValueError('invalid_apk_size')
-            with tempfile.TemporaryDirectory(prefix='lucky-verify-') as directory:
-                path = os.path.join(directory, 'artifact.apk')
-                remaining, digest = length, hashlib.sha256()
-                self.connection.settimeout(120)
-                with open(path, 'wb') as output:
-                    while remaining:
-                        chunk = self.rfile.read(min(1024 * 1024, remaining))
-                        if not chunk:
-                            raise ValueError('truncated_apk')
-                        output.write(chunk)
-                        digest.update(chunk)
-                        remaining -= len(chunk)
-                self.send_response(200)
-                self.send_header('content-type', 'application/x-ndjson')
-                self.send_header('connection', 'close')
-                self.end_headers()
-                self.stream_started = True
-                self.emit({'stage': 'hash'})
-                result = {'report': inspect_apk(path, length, digest.hexdigest(), lambda stage: self.emit({'stage': stage}))}
-        except (ValueError, subprocess.TimeoutExpired, zipfile.BadZipFile) as error:
-            result = {'error': str(error)[:200]}
-        except Exception:
-            self.send_error(503, 'verification_service_failed')
-            return
-        if getattr(self, 'stream_started', False):
-            self.emit(result)
-            return
-        payload = json.dumps(result).encode()
-        self.send_response(200)
-        self.send_header('content-type', 'application/json')
-        self.send_header('content-length', str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def emit(self, value):
-        self.wfile.write((json.dumps(value) + '\n').encode())
-        self.wfile.flush()
-
-    def log_message(self, format, *args):
-        pass  # Never log signed artifact URLs or credentials.
-
-
 if __name__ == '__main__':
-    HTTPServer(('0.0.0.0', 8080), Handler).serve_forever()
+    import sys
+    path = sys.argv[1]
+    digest = hashlib.sha256()
+    with open(path, 'rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            digest.update(chunk)
+    print(json.dumps(inspect_apk(path, os.path.getsize(path), digest.hexdigest())))

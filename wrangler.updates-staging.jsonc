@@ -6,6 +6,5 @@
  "vars": { "UPDATE_PACKAGE_NAME": "com.flzxing.lucky.updateqa" },
  "d1_databases": [{ "binding": "DB", "database_name": "lucky-updates-staging", "database_id": "effd0d59-593a-41f5-a850-c1feb1443dd8" }],
  "r2_buckets": [{ "binding": "APP_RELEASES", "bucket_name": "lucky-app-releases-staging" }],
- "queues": { "producers": [{ "binding": "UPDATE_VERIFY_QUEUE", "queue": "lucky-apk-verification-staging" }] },
  "triggers": { "crons": ["*/5 * * * *"] }, "observability": { "enabled": true }
 }

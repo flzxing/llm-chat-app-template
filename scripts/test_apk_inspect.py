@@ -1,8 +1,8 @@
 import sys
 import unittest
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from verifier import parse_badging
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from apk_inspect import parse_badging
 
 class VerifierTests(unittest.TestCase):
     def test_extracts_identity_and_flags(self):

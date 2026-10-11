@@ -1,5 +1,5 @@
 import { env, SELF } from 'cloudflare:test';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { handleAppUpdateRequest, rolloutBucket, validateContent, validateReport, maintainAppUpdates, base64url } from '../src/app-updates';
 import type { Env } from '../src/types';
 
@@ -10,12 +10,13 @@ const admin = { authorization: 'Bearer editor-secret' };
 const publish = { ...admin, 'x-release-credential': 'publisher-secret' };
 let configuration: Env;
 let publicKey: CryptoKey;
+let attestationKey: CryptoKey;
 beforeEach(async () => {
  await env.DB.batch(['update_events','update_audit','update_releases','update_upload_parts','update_verification_jobs','update_artifacts','update_rate_limits'].map(t => env.DB.prepare(`DELETE FROM ${t}`)));
  const keys = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign','verify']);
  publicKey = keys.publicKey;
- configuration = { ...env, UPDATE_EDITORS_JSON: JSON.stringify({ editor: 'editor-secret' }), UPDATE_PUBLISHERS_JSON: JSON.stringify({ publisher: 'publisher-secret' }), UPDATE_RELEASE_CERT_SHA256: cert, UPDATE_POLICY_PRIVATE_KEY: base64url(new Uint8Array(await crypto.subtle.exportKey('pkcs8', keys.privateKey))), UPDATE_POLICY_KEY_ID: 'test-key', UPDATE_VERIFICATION_SECRET: 'test-callback-secret' } as unknown as Env;
- configuration.UPDATE_VERIFY_QUEUE = { send: vi.fn().mockResolvedValue(undefined) } as unknown as Env['UPDATE_VERIFY_QUEUE'];
+ attestationKey = keys.privateKey;
+ configuration = { ...env, UPDATE_EDITORS_JSON: JSON.stringify({ editor: 'editor-secret' }), UPDATE_PUBLISHERS_JSON: JSON.stringify({ publisher: 'publisher-secret' }), UPDATE_RELEASE_CERT_SHA256: cert, UPDATE_POLICY_PRIVATE_KEY: base64url(new Uint8Array(await crypto.subtle.exportKey('pkcs8', keys.privateKey))), UPDATE_POLICY_KEY_ID: 'test-key', UPDATE_ATTESTATION_PUBLIC_KEYS_JSON: JSON.stringify({ mac: base64url(new Uint8Array(await crypto.subtle.exportKey('spki', keys.publicKey))) }) } as unknown as Env;
 });
 async function call(path: string, method = 'GET', data?: unknown, headers: Record<string,string> = {}) {
  const response = await handleAppUpdateRequest(new Request(`https://luckyaitool.com${path}`, { method, headers: { ...headers, ...(data ? { 'content-type': 'application/json' } : {}) }, body: data ? JSON.stringify(data) : undefined }), configuration);
@@ -25,6 +26,7 @@ async function seed(status = 'published', rollout = 100, min = 0, version = 2) {
  const id = crypto.randomUUID(), artifact = crypto.randomUUID(), now = Date.now();
  await configuration.APP_RELEASES.put(`quarantine/${artifact}.apk`, new Uint8Array([1,2,3]));
  await env.DB.prepare('INSERT INTO update_artifacts(id,object_key,file_name,size,status,report_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(artifact, `quarantine/${artifact}.apk`, 'app.apk', 3, 'verified', JSON.stringify({ ...report, versionCode: version }), now, now).run();
+ await env.DB.prepare('UPDATE update_artifacts SET object_version=? WHERE id=?').bind((await configuration.APP_RELEASES.head(`quarantine/${artifact}.apk`))!.version,artifact).run();
  await env.DB.prepare('INSERT INTO update_releases(id,artifact_id,version_code,status,rollout,min_version_code,content_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(id, artifact, version, status, rollout, min, JSON.stringify(content), now, now).run();
  return { id, artifact };
 }
@@ -110,37 +112,52 @@ describe('release control and audit', () => {
   expect(validateContent({...content, highlights:{...content.highlights, 'fr-FR': ['ok', 123]}})).toBe(false);
   expect(validateContent(content)).toBe(true); expect(validateContent({...content,heroUrl:'https://attacker.invalid/a.webp'})).toBe(false);
  });
- it('authenticates verification progress, prevents regression, and finalizes once', async () => {
-  const { artifact } = await seed();
-  await env.DB.prepare("UPDATE update_artifacts SET status='verifying' WHERE id=?").bind(artifact).run();
-  const callback = async (data: unknown, timestamp = String(Date.now())) => {
-   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(configuration.UPDATE_VERIFICATION_SECRET), {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
-   const bytes = await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(`${timestamp}.${JSON.stringify(data)}`));
-   const signature = Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
-   return call('/v1/internal/app-updates/verification','POST',data,{'x-verification-time':timestamp,'x-verification-signature':signature});
+ it('accepts signed local attestation once and rejects forgery, replay across artifacts, expiry and changed bytes', async () => {
+  const { artifact } = await seed('draft');
+  const object = await configuration.APP_RELEASES.head(`quarantine/${artifact}.apk`);
+  await env.DB.prepare("UPDATE update_artifacts SET status='verifying',object_version=?,verification_nonce='nonce-1234' WHERE id=?").bind(object!.version, artifact).run();
+  const callback = async (override: Record<string, unknown> = {}, tamper = false) => {
+   const data = { artifactId: artifact, origin: 'https://luckyaitool.com', issuedAt: Date.now(), nonce: 'nonce-1234', objectVersion: object!.version, report, ...override };
+   const payload = base64url(new TextEncoder().encode(JSON.stringify(data)));
+   const signature = base64url(new Uint8Array(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},attestationKey,new TextEncoder().encode(payload))));
+   return call('/v1/internal/app-updates/verification','POST',{keyId:'mac',payload:tamper ? payload+'a' : payload,signature});
   };
-  expect((await callback({artifactId:artifact,stage:'manifest'})).status).toBe(200);
-  await callback({artifactId:artifact,stage:'hash'});
-  expect((await env.DB.prepare('SELECT verification_stage AS stage FROM update_artifacts WHERE id=?').bind(artifact).first<{stage:string}>())?.stage).toBe('manifest');
-  expect((await callback({artifactId:artifact,stage:'invented'})).status).toBe(400);
-  expect((await callback({artifactId:artifact,report},String(Date.now()-600000))).status).toBe(401);
-  expect(await (await callback({artifactId:artifact,report})).json()).toMatchObject({accepted:true});
-  expect(await (await callback({artifactId:artifact,report})).json()).toMatchObject({duplicate:true});
+  expect((await callback({},true)).status).toBe(401);
+  expect((await callback({origin:'https://staging.example.com'})).status).toBe(401);
+  expect((await callback({issuedAt:Date.now()-600000})).status).toBe(401);
+  expect((await callback({nonce:'another-artifact'})).status).toBe(409);
+  expect((await callback({objectVersion:'replaced-object'})).status).toBe(409);
+  const original = object!.version;
+  await configuration.APP_RELEASES.put(`quarantine/${artifact}.apk`,new Uint8Array([4,5,6]));
+  expect((await callback()).status).toBe(409);
+  const replacement = await configuration.APP_RELEASES.head(`quarantine/${artifact}.apk`);
+  await env.DB.prepare('UPDATE update_artifacts SET object_version=? WHERE id=?').bind(replacement!.version,artifact).run();
+  expect(await (await callback({objectVersion:replacement!.version})).json()).toMatchObject({accepted:true});
+  expect(await (await callback({objectVersion:replacement!.version})).json()).toMatchObject({duplicate:true});
+  expect((await callback({objectVersion:original})).status).toBe(409);
   expect((await env.DB.prepare("SELECT COUNT(*) AS count FROM update_audit WHERE action='verified'").first<{count:number}>())?.count).toBe(1);
+ });
+ it('does not accept old HMAC verification callbacks', async () => {
+  expect((await call('/v1/internal/app-updates/verification','POST',{artifactId:'fake-123456',report},{'x-verification-time':String(Date.now()),'x-verification-signature':'old-hmac'})).status).toBe(401);
  });
  it('restricts update artwork to the serving origin, including isolated staging', () => {
   const origin='https://lucky-updates-staging.example.workers.dev';
   expect(validateContent({...content,heroUrl:origin+'/assets/app-update-art/crystal.webp'},origin)).toBe(true);
   for (const heroUrl of ['https://luckyaitool.com/assets/app-update-art/crystal.webp?redirect=1', 'https://attacker.invalid/assets/app-update-art/crystal.webp','https://name:secret@luckyaitool.com/assets/app-update-art/crystal.webp']) expect(validateContent({...content,heroUrl})).toBe(false);
  });
- it('uploads a small final part and queues verification without buffering a complete APK', async () => {
+ it('uploads a small final part and waits for local attestation without buffering a complete APK', async () => {
   const created = await call('/v1/admin/app-updates/uploads','POST',{fileName:'app.apk',bytes:3},admin);
   expect(created.status).toBe(200); const {id} = await created.json<{id:string}>();
   const data = new Uint8Array([1,2,3]); const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)),b=>b.toString(16).padStart(2,'0')).join('');
   const uploaded = await handleAppUpdateRequest(new Request(`https://luckyaitool.com/v1/admin/app-updates/uploads/${id}/parts/1`,{method:'PUT',headers:{...admin,'content-length':'3','x-part-sha256':digest},body:data}),configuration);
   expect(uploaded?.status).toBe(200);
   const completed = await call(`/v1/admin/app-updates/uploads/${id}/complete`,'POST',{},admin); expect(completed.status).toBe(200);
-  expect(configuration.UPDATE_VERIFY_QUEUE.send).toHaveBeenCalledTimes(1);
+  const session = await (await call(`/v1/admin/app-updates/uploads/${id}`, 'GET', undefined, admin)).json<{object_version:string;verification_nonce:string}>();
+  expect(session.object_version).toBeTruthy(); expect(session.verification_nonce).toBeTruthy();
+  expect((await call(`/v1/admin/app-updates/uploads/${id}/source`)).status).toBe(401);
+  const readback = await call(`/v1/admin/app-updates/uploads/${id}/source`, 'GET', undefined, admin);
+  expect(readback.headers.get('x-artifact-version')).toBe(session.object_version);
+  expect(new Uint8Array(await readback.arrayBuffer())).toEqual(data);
   expect((await env.DB.prepare('SELECT status FROM update_artifacts WHERE id=?').bind(id).first<{status:string}>())?.status).toBe('verifying');
   expect((await call(`/assets/app-releases/${id}.apk`)).status).toBe(410);
  });
