@@ -1,0 +1,41 @@
+{
+  "recordedAt": "2026-10-11T06:49:05.539957+00:00",
+  "sourceCommit": "b1d784b",
+  "production": {
+    "worker": "llm-chat-app-template",
+    "origin": "https://luckyaitool.com",
+    "versionId": "3848ae26-3bcf-4f6f-a404-9c58d07177cc",
+    "ops": "https://luckyaitool.com/ops/releases",
+    "officialReleasePublished": false
+  },
+  "staging": {
+    "worker": "lucky-updates-staging",
+    "versionId": "06ed7f56-f144-4e4d-a124-e3892b826f8c",
+    "realApkVersionCode": 1009,
+    "releaseWithdrawnAfterQa": true
+  },
+  "tests": {
+    "worker": 62,
+    "releaseToolNode": 2,
+    "releaseToolPython": 3,
+    "opsUnit": 22,
+    "opsPlaywright": 11,
+    "typescript": true,
+    "opsBuild": true,
+    "dryRun": true,
+    "productionBrowser": true
+  },
+  "infrastructure": {
+    "workersPaidEnabled": false,
+    "containersRequired": false,
+    "verificationQueueRequired": false,
+    "selfHostedLinuxRequired": false
+  },
+  "clientCodeCommitted": false,
+  "emulatorsRunning": false,
+  "firstOfficialReleasePrerequisites": [
+    "Product owner supplies official RevenueCat Android key",
+    "Encrypted offline signing backup and recovery verification",
+    "First official installation acceptance"
+  ]
+}

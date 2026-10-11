@@ -1,0 +1,81 @@
+{
+  "time": "2026-10-11T06:44:11.193Z",
+  "origin": "https://lucky-updates-staging.zhouxing87808911.workers.dev",
+  "checks": [
+    {
+      "name": "unsigned attestation rejected",
+      "passed": true
+    },
+    {
+      "name": "editor session authenticated",
+      "passed": true
+    },
+    {
+      "name": "ops entry live",
+      "passed": true
+    },
+    {
+      "name": "policy signature and binding",
+      "passed": true
+    },
+    {
+      "name": "editor cannot publish",
+      "passed": true
+    },
+    {
+      "name": "scheduled release stays hidden",
+      "passed": true
+    },
+    {
+      "name": "published release selected",
+      "passed": true
+    },
+    {
+      "name": "Range delivery",
+      "passed": true
+    },
+    {
+      "name": "Range bytes match actual APK",
+      "passed": true
+    },
+    {
+      "name": "HEAD length and ETag",
+      "passed": true
+    },
+    {
+      "name": "stable download points to 100% verified release",
+      "passed": true
+    },
+    {
+      "name": "mandatory users bypass gray bucket",
+      "passed": true
+    },
+    {
+      "name": "paused release stops new exposure",
+      "passed": true
+    },
+    {
+      "name": "paused release preserves existing authorization",
+      "passed": true
+    },
+    {
+      "name": "revocation blocks download",
+      "passed": true
+    },
+    {
+      "name": "revocation blocks installation authorization",
+      "passed": true
+    },
+    {
+      "name": "events and stats available",
+      "passed": true
+    },
+    {
+      "name": "audit available",
+      "passed": true
+    }
+  ],
+  "releaseId": "94533609-d21e-4c7d-a275-f97546a4ca79",
+  "artifactId": "c1f183bd-5f92-4ef0-b94a-c4eb9e69e14f",
+  "note": "Real QA APK verified by local SDK and signed report. QA release revoked after acceptance; no production publication."
+}

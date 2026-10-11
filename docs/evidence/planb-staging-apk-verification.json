@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-10-11T06:43:20.979Z",
+  "origin": "https://lucky-updates-staging.zhouxing87808911.workers.dev",
+  "artifactId": "c1f183bd-5f92-4ef0-b94a-c4eb9e69e14f",
+  "objectVersion": "7e5ed64cd7516efd77eae4624bdac03f",
+  "accepted": true,
+  "report": {
+    "packageName": "com.flzxing.lucky.updateqa",
+    "versionCode": 1009,
+    "versionName": "0.1.1009-qa",
+    "minSdk": 26,
+    "targetSdk": 36,
+    "abis": [
+      "arm64-v8a"
+    ],
+    "certificateSha256": "e7e71859718363899ad899f2b0fa7eedfc219d89474526157ce139ecc085037b",
+    "sha256": "a2afd25b735db62eef22bce28d38baf64ee9ba903565d9e480de7b5cf2f5bcc9",
+    "bytes": 99374791,
+    "debuggable": false
+  },
+  "error": null
+}

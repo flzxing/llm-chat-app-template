@@ -1,0 +1,16 @@
+{
+  "time": "2026-10-11T06:45:36.134Z",
+  "queuesDeleted": [
+    "lucky-apk-verification",
+    "lucky-apk-verification-failed",
+    "lucky-apk-verification-staging",
+    "lucky-apk-verification-staging-dlq"
+  ],
+  "workersDeleted": [
+    "lucky-apk-verifier-staging"
+  ],
+  "secretsDeleted": [
+    "llm-chat-app-template:UPDATE_VERIFICATION_SECRET",
+    "lucky-updates-staging:UPDATE_VERIFICATION_SECRET"
+  ]
+}

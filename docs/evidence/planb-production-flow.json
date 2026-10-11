@@ -1,0 +1,56 @@
+{
+  "time": "2026-10-11T06:48:16.997Z",
+  "origin": "https://luckyaitool.com",
+  "checks": [
+    {
+      "name": "unsigned attestation rejected",
+      "passed": true
+    },
+    {
+      "name": "editor session authenticated",
+      "passed": true
+    },
+    {
+      "name": "ops entry live",
+      "passed": true
+    },
+    {
+      "name": "policy signature and binding",
+      "passed": true
+    },
+    {
+      "name": "free Worker streams upload",
+      "passed": true
+    },
+    {
+      "name": "multipart completion awaits local proof",
+      "passed": true
+    },
+    {
+      "name": "read-back object accessible only to editor",
+      "passed": true
+    },
+    {
+      "name": "unverified object private",
+      "passed": true
+    },
+    {
+      "name": "unverified object cannot create release",
+      "passed": true
+    },
+    {
+      "name": "real SDK rejects invalid APK and signed rejection reaches production",
+      "passed": true
+    },
+    {
+      "name": "test upload cleaned",
+      "passed": true
+    },
+    {
+      "name": "cancelled source no longer accessible",
+      "passed": true
+    }
+  ],
+  "artifactId": "84ea9742-1c53-4553-9b12-04dc98daa0cc",
+  "note": "No production release published; invalid test object deleted."
+}
