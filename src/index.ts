@@ -22,6 +22,8 @@ import { handleFeedbackRequest } from "./feedback";
 import { handleThemeRequest } from "./themes";
 import { getToolIndexStatus, initializeToolIndex } from "./tool-router";
 import type { Env } from "./types";
+import { createShare, listShares, revokeShare, publicShare } from "./shares";
+
 import { handleAppUpdateRequest, maintainAppUpdates } from "./app-updates";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -155,6 +157,27 @@ app.all("/api/messages/:id", async (c) => {
 	if (!session) return c.json({ error: "Unauthorized" }, 401);
 	return handleDeleteMessage(c.env, session.user.id, c.req.param("id"));
 });
+
+app.use("/api/shares*", async (c, next) => {
+	c.header("Cache-Control", "no-store");
+	await next();
+});
+app.all("/api/shares", async (c) => {
+	if (c.req.method === "OPTIONS") return c.body(null, 204);
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.json({ error: "Unauthorized" }, 401);
+	if (c.req.method === "POST") return createShare(c.req.raw, c.env, session.user.id);
+	if (c.req.method === "GET") return listShares(c.req.raw, c.env, session.user.id);
+	return c.json({ error: "Method not allowed" }, 405);
+});
+app.all("/api/shares/:id", async (c) => {
+	if (c.req.method === "OPTIONS") return c.body(null, 204);
+	const session = await createAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+	if (!session) return c.json({ error: "Unauthorized" }, 401);
+	if (c.req.method !== "DELETE") return c.json({ error: "Method not allowed" }, 405);
+	return revokeShare(c.env, session.user.id, c.req.param("id"));
+});
+app.get("/s/:token", c => publicShare(c.env, c.req.param("token")));
 
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 

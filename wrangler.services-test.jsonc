@@ -1,0 +1,40 @@
+{
+  "name": "lucky-services-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-10-08",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./public",
+    "run_worker_first": [
+      "/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "services-test",
+      "database_id": "00000000-0000-4000-8000-000000000002"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "APP_RELEASES",
+      "bucket_name": "services-updates-test"
+    },
+    {
+      "binding": "THEMES",
+      "bucket_name": "services-themes-test"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "UPDATE_VERIFY_QUEUE",
+        "queue": "services-updates-test"
+      }
+    ]
+  }
+}
