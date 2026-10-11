@@ -2,6 +2,7 @@
  "$schema": "node_modules/wrangler/config-schema.json",
  "name": "lucky-updates-staging", "main": "src/app-updates-entry.ts", "compatibility_date": "2025-10-08",
  "compatibility_flags": ["nodejs_compat"], "workers_dev": true,
+ "routes": [{ "pattern": "updates-qa.luckyaitool.com", "zone_name": "luckyaitool.com", "custom_domain": true }],
  "assets": { "binding": "ASSETS", "directory": "./public", "run_worker_first": ["/v1/app-updates/*", "/v1/admin/app-updates/*", "/v1/internal/app-updates/*", "/assets/app-releases/*", "/assets/app-update-art/*", "/download/*"] },
  "vars": { "UPDATE_PACKAGE_NAME": "com.flzxing.lucky.updateqa" },
  "d1_databases": [{ "binding": "DB", "database_name": "lucky-updates-staging", "database_id": "effd0d59-593a-41f5-a850-c1feb1443dd8" }],

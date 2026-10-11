@@ -25,6 +25,8 @@ Worker 与运营台仓库：`/Users/zhouxing/Developer/Backend/CFWorkers/llm-cha
 → App 检查 → 提醒 → 下载 → 再次校验 → 用户确认安装 → 新版启动确认
 ```
 
+真机测试统一使用 `https://updates-qa.luckyaitool.com`（独立 `.updateqa` 包与测试证书 / 策略密钥）。部分设备网络无法访问 `workers.dev`，Mac 检查成功不能代替真机网络验证。测试前先在目标真机验证测试域名 HTTPS 和 App 内手动检查，再发布测试目标包；基线和目标 APK 必须使用同一个可访问的测试域名。
+
 不需要 Linux、Docker、付费容器或常驻发布电脑。Mac 仅在制品校验时在线；校验完成后，提醒、下载、定时发布和统计均由 Worker 服务提供。
 
 ## 2. 免费方案的信任边界

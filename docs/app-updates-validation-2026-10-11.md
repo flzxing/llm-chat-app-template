@@ -45,3 +45,11 @@ QA 制品 ID：`c1f183bd-5f92-4ef0-b94a-c4eb9e69e14f`；QA 发布 ID：`94533609
 免费额度依旧是有限额度。8 GiB 制品配额仅约束本功能，不是全账户绝对零账单开关，主题等已有 R2 用量需共同预算。完整操作说明见 [发布运营手册](app-updates-runbook.md)。
 
 部署代码与最终版本信息另见 [部署清单](evidence/planb-deployment.json)。
+
+## 真机追加发现：测试域名不可达
+
+用户连接的 API 36 / arm64 真机访问 `lucky-updates-staging.zhouxing87808911.workers.dev` 在 20 秒后超时，同一真机访问 `luckyaitool.com` 正常。此前隔离线上验收从 Mac 发起，未证明这台手机能访问 workers.dev，因此准备 QA 1010 时遗漏了设备网络预检。
+
+已为原 staging Worker 增加自有域名 `updates-qa.luckyaitool.com`，保持正式服务、包名、签名和数据隔离。真机 HTTPS 返回 200；QA 1008 基线保留数据重新安装后，App 内手动检查成功。旧 QA 1010 已撤回，新的 QA 1011 使用同一自有域名，避免安装完成后又回到不可达地址。该修复不放宽 APK 或策略签名检查，不引入付费服务。
+
+同一台真机冷启动 QA 1008 后，已通过实际 UI 确认自动弹出 QA 1011 提醒（非设计预览、非手动强制展示）。保留弹窗供用户亲自验证，未点击下载或安装。最终真机验证结果另见 [设备网络修复记录](evidence/real-phone-domain-fix.json)。

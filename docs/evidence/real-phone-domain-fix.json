@@ -1,0 +1,29 @@
+{
+  "recordedAt": "2026-10-11T07:24:23.034826+00:00",
+  "device": {
+    "sdkInt": 36,
+    "abi": "arm64-v8a"
+  },
+  "rootCause": "Physical device cannot connect to the workers.dev test hostname; request times out after 20 seconds.",
+  "oldHostnameTimedOut": true,
+  "productionHostnameHttpsStatus": 200,
+  "fixedTestOrigin": "https://updates-qa.luckyaitool.com",
+  "fixedTestHttpsStatus": 200,
+  "manualCheckInAppSucceeded": true,
+  "baselineReinstalledWithoutDataClear": true,
+  "baselineVersionCode": 1008,
+  "targetVersionCode": 1011,
+  "oldRelease1010Revoked": true,
+  "releaseId": "8fa1f3be-0949-4092-902d-49a2a373d5ee",
+  "artifactId": "3456e15b-e9b3-48f1-bdc4-ef55b10df4e8",
+  "policySignatureVerified": true,
+  "automaticColdStartOfferConfirmed": true,
+  "observedUi": [
+    "v0.1.1011-qa",
+    "新版本已准备好",
+    "0.1.1008-qa  →  0.1.1011-qa",
+    "下载更新"
+  ],
+  "downloadOrInstallClicked": false,
+  "originalDevelopmentAppChanged": false
+}
