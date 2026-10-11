@@ -1,7 +1,9 @@
 /** Explicit online QA: never publishes a release to the production origin. */
 import { readFileSync, writeFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
-import { randomUUID, createPublicKey, verify } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { randomUUID, createPublicKey, createPrivateKey, verify } from 'node:crypto';
 const options = Object.fromEntries(process.argv.slice(2).reduce((pairs,v,i,a)=>v.startsWith('--')?[...pairs,[v.slice(2),a[i+1]]]:pairs,[]));
 const config = JSON.parse(readFileSync(options.config,'utf8'));
 const secrets = JSON.parse(readFileSync(options.secrets,'utf8'));
@@ -17,7 +19,8 @@ const input={protocolVersion:1,packageName:config.packageName,versionCode:1,abi:
 async function policy(extra={}) {
  const {response,body}=await call('/v1/app-updates/check','POST',{...input,...extra});
  assert.equal(response.status,200);
- const pub=createPublicKey(secrets.UPDATE_POLICY_PRIVATE_KEY);
+ const value=secrets.UPDATE_POLICY_PRIVATE_KEY;
+ const pub=createPublicKey(createPrivateKey(value.includes('BEGIN') ? value : {key:Buffer.from(value,'base64'),format:'der',type:'pkcs8'}));
  assert(verify('sha256',Buffer.from(body.payload),{key:pub,dsaEncoding:'ieee-p1363'},Buffer.from(body.signature,'base64url')));
  return JSON.parse(Buffer.from(body.payload,'base64url'));
 }
@@ -38,6 +41,8 @@ try {
   check('unverified object private',(await fetch(origin+`/assets/app-releases/${upload.id}.apk`)).status===410);
   const content={titles:{'zh-CN':'测试','en-US':'Test'},summaries:{'zh-CN':'测试','en-US':'Test'},highlights:{'zh-CN':[],'en-US':[]},notes:{'zh-CN':'测试','en-US':'Test'}};
   check('unverified object cannot create release',(await call('/v1/admin/app-updates/releases','POST',{artifactId:upload.id,content})).response.status===409);
+  const rejected = spawnSync(process.execPath, [fileURLToPath(new URL('./app-release.mjs', import.meta.url)), '--verify', '--artifact', upload.id, '--config', options.config], {encoding:'utf8',timeout:360000});
+  check('real SDK rejects invalid APK and signed rejection reaches production', rejected.status===1 && (await call(`/v1/admin/app-updates/uploads/${upload.id}`)).body.status==='rejected');
   check('test upload cleaned',(await call(`/v1/admin/app-updates/uploads/${upload.id}`,'DELETE')).response.status===200);
   check('cancelled source no longer accessible',(await call(`/v1/admin/app-updates/uploads/${upload.id}/source`)).response.status===409);
   evidence.note='No production release published; invalid test object deleted.';
