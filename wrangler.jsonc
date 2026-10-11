@@ -14,7 +14,8 @@
 	],
 	"assets": {
 		"binding": "ASSETS",
-		"directory": "./public"
+		"directory": "./public",
+		"run_worker_first": ["/v1/app-updates/*", "/v1/admin/app-updates/*", "/v1/internal/app-updates/*", "/assets/app-releases/*", "/assets/app-update-art/*", "/download/luckytool.apk"]
 	},
 	// 生产部署用；本地 wrangler dev 以 .dev.vars 中的 BETTER_AUTH_URL 覆盖
 	"routes": [
@@ -62,7 +63,10 @@
 			"migrations_dir": "migrations"
 		}
 	],
-	"r2_buckets": [
+	"triggers": { "crons": ["*/5 * * * *"] },
+ "queues": { "producers": [{ "binding": "UPDATE_VERIFY_QUEUE", "queue": "lucky-apk-verification" }] },
+ "r2_buckets": [
+  { "binding": "APP_RELEASES", "bucket_name": "lucky-app-releases" },
 		{
 			"binding": "THEMES",
 			"bucket_name": "lucky-themes"

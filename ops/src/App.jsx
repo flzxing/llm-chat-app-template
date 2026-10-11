@@ -13,6 +13,9 @@ import {
 import { fetchAdminPacks, mapAdminError } from "./themeOps.js";
 import { ThemeConsole } from "./ThemeConsole.jsx";
 import { FeedbackConsole } from "./FeedbackConsole.jsx";
+import { ReleaseConsole } from "./ReleaseConsole.jsx";
+import { releaseApi } from "./releaseOps.js";
+import coverReleases from "./assets/cover-releases.webp";
 import loginHero from "./assets/login-hero.webp";
 import coverThemes from "./assets/cover-themes.webp";
 import coverFeedback from "./assets/cover-prompts.webp";
@@ -22,6 +25,7 @@ import coverPets from "./assets/cover-pets.webp";
 import emptySoon from "./assets/empty-soon.webp";
 
 const COVERS = {
+  releases: coverReleases,
   themes: coverThemes,
   feedback: coverFeedback,
   prompts: coverPrompts,
@@ -67,6 +71,7 @@ function Mark({ className }) {
 
 function IconGlyph({ id }) {
   const paths = {
+    releases: "M14 26V12l-5 5-3-3L16 4l10 10-3 3-5-5v14z",
     themes: "M6 7h20v4H6zm0 7h12v4H6zm0 7h20v4H6z",
     feedback: "M7 6h18v14H12l-5 6V6zm4 4h10v2H11zm0 4h7v2h-7z",
     prompts: "M8 6h16v14H14l-6 6V6zm4 5h8v2h-8zm0 4h6v2h-6z",
@@ -93,6 +98,7 @@ function useOpsRoute() {
   function navigate(routePath) {
     const next = opsUrl(routePath);
     if (`${window.location.pathname}${window.location.search}` === next) return;
+    if (!window.dispatchEvent(new Event("ops-before-navigate", { cancelable: true }))) return;
     window.history.pushState({}, "", next);
     setPath(parseOpsPath(next));
   }
@@ -147,7 +153,7 @@ function HomeScreen({ onOpen }) {
       <header className="home-head">
         <p className="eyebrow">Command deck</p>
         <h1>选择一个运营域</h1>
-        <p className="muted">主题管理与用户反馈已开放。其余入口已预留，不会写入任何货架接口。</p>
+        <p className="muted">版本发布、主题管理与用户反馈已开放。让每一次产品进步稳妥送达。</p>
       </header>
       <div className="bento">
         {OPS_MODULES.map((mod, index) => (
@@ -214,7 +220,7 @@ export function App() {
   }
 
   async function verify(nextToken) {
-    await fetchAdminPacks(nextToken);
+    try { await fetchAdminPacks(nextToken); } catch { await releaseApi(nextToken, "/session"); }
     persistOpsToken(nextToken);
     setToken(nextToken);
     setAuthed(true);
@@ -314,6 +320,7 @@ export function App() {
         {path === "/" ? <HomeScreen onOpen={navigate} /> : null}
         {path === "/themes" ? <ThemeConsole token={token} onUnauthorized={logout} /> : null}
         {path === "/feedback" ? <FeedbackConsole token={token} onUnauthorized={logout} /> : null}
+        {path === "/releases" ? <ReleaseConsole token={token} onUnauthorized={logout} /> : null}
         {current && !isOpenModule(current) ? <ComingSoon mod={current} /> : null}
         {path !== "/" && !current ? (
           <div className="coming">

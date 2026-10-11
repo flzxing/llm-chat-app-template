@@ -3,6 +3,15 @@
  */
 
 export interface Env {
+ APP_RELEASES: R2Bucket;
+ UPDATE_VERIFY_QUEUE: Queue<{ artifactId: string; objectKey: string; bytes: number }>;
+ UPDATE_EDITORS_JSON?: string;
+ UPDATE_PUBLISHERS_JSON?: string;
+ UPDATE_PACKAGE_NAME?: string;
+ UPDATE_RELEASE_CERT_SHA256?: string;
+ UPDATE_POLICY_PRIVATE_KEY?: string;
+ UPDATE_POLICY_KEY_ID?: string;
+ UPDATE_VERIFICATION_SECRET?: string;
 	/**
 	 * Binding for Workers AI runtime.
 	 */

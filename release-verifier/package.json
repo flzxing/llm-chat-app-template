@@ -1,0 +1,6 @@
+{
+ "name": "lucky-apk-verifier", "private": true, "type": "module",
+ "scripts": { "check": "tsc --noEmit", "test": "python3 -m unittest discover -s test", "deploy": "wrangler deploy", "dev": "wrangler dev" },
+ "dependencies": { "@cloudflare/containers": "0.0.24" },
+ "devDependencies": { "wrangler": "4.56.0", "typescript": "5.9.3", "@cloudflare/workers-types": "4.20251217.0" }
+}

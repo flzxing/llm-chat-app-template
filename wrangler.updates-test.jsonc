@@ -1,0 +1,6 @@
+{
+ "name": "lucky-updates-test", "main": "src/app-updates-entry.ts", "compatibility_date": "2025-10-08", "compatibility_flags": ["nodejs_compat"],
+ "d1_databases": [{ "binding": "DB", "database_name": "updates-test", "database_id": "00000000-0000-4000-8000-000000000001" }],
+ "r2_buckets": [{ "binding": "APP_RELEASES", "bucket_name": "updates-test" }],
+ "queues": { "producers": [{ "binding": "UPDATE_VERIFY_QUEUE", "queue": "updates-test" }] }
+}

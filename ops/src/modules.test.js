@@ -14,7 +14,7 @@ import {
 test("theme and feedback modules are open", () => {
   assert.deepEqual(
     OPS_MODULES.filter(isOpenModule).map((item) => item.id),
-    ["themes", "feedback"],
+    ["releases", "themes", "feedback"],
   );
   assert.equal(OPS_MODULES.filter((item) => item.status === "soon").length, 3);
 });

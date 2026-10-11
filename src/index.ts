@@ -22,6 +22,7 @@ import { handleFeedbackRequest } from "./feedback";
 import { handleThemeRequest } from "./themes";
 import { getToolIndexStatus, initializeToolIndex } from "./tool-router";
 import type { Env } from "./types";
+import { handleAppUpdateRequest, maintainAppUpdates } from "./app-updates";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -36,9 +37,15 @@ app.use(
 			"If-None-Match",
 			"x-captcha-response",
 			"x-admin-init-key",
+            "x-release-credential",
+            "x-part-sha256",
+            "Range",
+            "If-Range",
 		],
 		exposeHeaders: [
 			"Content-Length",
+            "Content-Range",
+            "ETag",
 			"set-auth-token",
 			"Set-Auth-Token",
 			"X-Credits-Remaining",
@@ -51,6 +58,8 @@ app.use(
 app.use("*", secureHeaders());
 
 app.use("*", async (c, next) => {
+	const update = await handleAppUpdateRequest(c.req.raw, c.env);
+    if (update) return update;
 	const feedback = await handleFeedbackRequest(c.req.raw, c.env);
 	if (feedback) return feedback;
 	const themed = await handleThemeRequest(c.req.raw, c.env);
@@ -159,4 +168,9 @@ app.all("*", async (c) => {
 	return c.env.ASSETS.fetch(c.req.raw);
 });
 
-export default app;
+export default {
+ fetch: app.fetch,
+ scheduled: (_event: ScheduledController, env: Env, ctx: ExecutionContext) => {
+  ctx.waitUntil(maintainAppUpdates(env));
+ },
+};

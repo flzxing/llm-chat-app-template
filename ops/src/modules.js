@@ -1,6 +1,7 @@
 export const OPS_BASE = "/ops";
 
 export const OPS_MODULES = [
+  { id: "releases", title: "版本发布", status: "open", href: "/releases", kicker: "正式渠道", blurb: "APK 校验、灰度发布与真实升级追踪。", cover: "releases" },
   {
     id: "themes",
     title: "主题管理",
